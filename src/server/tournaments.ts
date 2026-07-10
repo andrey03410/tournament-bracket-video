@@ -17,17 +17,27 @@ export async function createTournament(
   userId: string,
   input: CreateInput,
   tracks: ExtractedTrack[],
+  limits?: { maxTournaments: number | null },
 ) {
   if (tracks.length < 2) throw new Error("NEED_AT_LEAST_TWO_TRACKS");
 
-  const tournament = await prisma.tournament.create({
-    data: {
-      userId,
-      title: input.title,
-      scheme: input.scheme,
-      blindMode: input.blindMode,
-      status: "in_progress",
-    },
+  // The slot check and the create run in one transaction so two concurrent
+  // uploads cannot both squeeze past a 1-tournament quota.
+  const tournament = await prisma.$transaction(async (tx) => {
+    const max = limits?.maxTournaments ?? null;
+    if (max !== null) {
+      const count = await tx.tournament.count({ where: { userId } });
+      if (count >= max) throw new Error("TOURNAMENT_LIMIT");
+    }
+    return tx.tournament.create({
+      data: {
+        userId,
+        title: input.title,
+        scheme: input.scheme,
+        blindMode: input.blindMode,
+        status: "in_progress",
+      },
+    });
   });
 
   let order = 0;
@@ -41,6 +51,7 @@ export async function createTournament(
         kind: t.kind,
         filePath: "",
         order: order++,
+        sizeBytes: t.data.length,
       },
     });
     const ext = path.extname(t.filename) || (t.kind === "video" ? ".mp4" : ".mp3");

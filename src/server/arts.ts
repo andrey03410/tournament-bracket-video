@@ -103,6 +103,17 @@ export interface CreateArtInput {
   fileName: string;
   data: Buffer;
   label?: string | null;
+  /** Total pool size ceiling for this user in bytes; null = unlimited. */
+  maxPoolBytes?: number | null;
+}
+
+/** Total bytes the user's pool occupies (sum of stored file sizes). */
+export async function poolUsageBytes(userId: string): Promise<number> {
+  const agg = await prisma.art.aggregate({
+    where: { userId },
+    _sum: { sizeBytes: true },
+  });
+  return agg._sum.sizeBytes ?? 0;
 }
 
 /**
@@ -124,7 +135,20 @@ export async function createArt(userId: string, input: CreateArtInput) {
     path.basename(input.fileName, path.extname(input.fileName)).trim() ||
     null;
 
-  const art = await prisma.art.create({ data: { userId, filePath: "", label, kind } });
+  // Quota claim happens in one transaction with the row insert (sizeBytes is
+  // set immediately), so two concurrent uploads can't both fit into the last
+  // free megabytes.
+  const art = await prisma.$transaction(async (tx) => {
+    const max = input.maxPoolBytes ?? null;
+    if (max !== null) {
+      const agg = await tx.art.aggregate({ where: { userId }, _sum: { sizeBytes: true } });
+      const used = agg._sum.sizeBytes ?? 0;
+      if (used + input.data.length > max) throw new Error("POOL_QUOTA");
+    }
+    return tx.art.create({
+      data: { userId, filePath: "", label, kind, sizeBytes: input.data.length },
+    });
+  });
   const rel = await saveFile(artPath(userId, art.id, ext), input.data);
 
   let durationSec: number | null = null;

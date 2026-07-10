@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { auth } from "@/auth";
+import { currentUser } from "@/auth";
+import { formatBytes, quotasFor } from "@/lib/domain/permissions";
 import { listTournaments } from "@/server/tournaments";
 import { CreateTournamentForm } from "./CreateTournamentForm";
 import { DeleteTournamentButton } from "./DeleteTournamentButton";
@@ -16,14 +17,23 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export default async function TournamentsPage() {
-  const session = await auth();
-  if (!session?.user) redirect("/login");
-  const tournaments = await listTournaments(session.user.id);
+  const user = await currentUser();
+  if (!user) redirect("/");
+  const tournaments = await listTournaments(user.id);
+  const quotas = quotasFor(user.role);
 
   return (
     <div className="container">
       <h1>Мои топы</h1>
-      <CreateTournamentForm />
+      <CreateTournamentForm
+        limits={{
+          archiveLimitLabel: formatBytes(quotas.maxArchiveBytes),
+          slotsLeft:
+            quotas.maxTournaments === null
+              ? null
+              : quotas.maxTournaments - tournaments.length,
+        }}
+      />
 
       <div className="panel">
         <h2>Список турниров</h2>

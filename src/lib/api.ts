@@ -1,16 +1,41 @@
 import { NextResponse } from "next/server";
-import { requireUserId } from "@/auth";
+import { requireUser, type SessionUser } from "@/auth";
+import { can, type Permission } from "@/lib/domain/permissions";
 
-/** Resolve the current user id or return a 401 response to short-circuit a route. */
+/**
+ * Resolve the current user (id + fresh role) or return a 401 response to
+ * short-circuit a route.
+ */
 export async function userOr401(): Promise<
-  { userId: string } | { response: NextResponse }
+  { userId: string; user: SessionUser } | { response: NextResponse }
 > {
   try {
-    const userId = await requireUserId();
-    return { userId };
+    const user = await requireUser();
+    return { userId: user.id, user };
   } catch {
     return { response: NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 }) };
   }
+}
+
+/** Like userOr401, but additionally requires a permission (403 otherwise). */
+export async function permissionOr403(
+  permission: Permission,
+  message = "Недостаточно прав",
+): Promise<{ userId: string; user: SessionUser } | { response: NextResponse }> {
+  const auth = await userOr401();
+  if ("response" in auth) return auth;
+  if (!can(auth.user.role, permission)) {
+    return { response: NextResponse.json({ error: message }, { status: 403 }) };
+  }
+  return auth;
+}
+
+export function forbidden(message = "Недостаточно прав") {
+  return NextResponse.json({ error: message }, { status: 403 });
+}
+
+export function tooLarge(message: string) {
+  return NextResponse.json({ error: message }, { status: 413 });
 }
 
 export function badRequest(message: string) {

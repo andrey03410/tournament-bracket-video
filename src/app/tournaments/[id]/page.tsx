@@ -15,7 +15,7 @@ export default async function TournamentOverview({
   params: { id: string };
 }) {
   const session = await auth();
-  if (!session?.user) redirect("/login");
+  if (!session?.user) redirect("/");
 
   const t = await getTournament(session.user.id, params.id);
   if (!t) notFound();

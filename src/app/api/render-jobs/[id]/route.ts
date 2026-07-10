@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { userOr401, notFound } from "@/lib/api";
+import { userOr401, notFound, badRequest } from "@/lib/api";
 import { prisma } from "@/lib/db";
+import { deleteRenderJob } from "@/server/users";
 
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
   const auth = await userOr401();
@@ -18,4 +19,18 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     error: job.error,
     downloadUrl: job.outputPath ? `/api/render-jobs/${job.id}/download` : null,
   });
+}
+
+export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
+  const auth = await userOr401();
+  if ("response" in auth) return auth.response;
+  try {
+    await deleteRenderJob(auth.userId, params.id);
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    const msg = (e as Error).message;
+    if (msg === "NOT_FOUND") return notFound();
+    if (msg === "JOB_ACTIVE") return badRequest("Дождитесь завершения рендера");
+    throw e;
+  }
 }

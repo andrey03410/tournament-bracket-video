@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useFormState, useFormStatus } from "react-dom";
 import { loginAction, registerAction, type AuthState } from "./actions";
 
@@ -13,8 +14,11 @@ function SubmitButton({ label }: { label: string }) {
   );
 }
 
-export default function LoginPage() {
-  const [mode, setMode] = useState<"login" | "register">("login");
+function LoginForm() {
+  const params = useSearchParams();
+  const [mode, setMode] = useState<"login" | "register">(
+    params.get("mode") === "register" ? "register" : "login",
+  );
   const action = mode === "login" ? loginAction : registerAction;
   const [state, formAction] = useFormState<AuthState, FormData>(action, undefined);
 
@@ -49,5 +53,14 @@ export default function LoginPage() {
         </a>
       </p>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  // useSearchParams requires a Suspense boundary for static prerendering.
+  return (
+    <Suspense>
+      <LoginForm />
+    </Suspense>
   );
 }

@@ -5,6 +5,7 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { signIn } from "@/auth";
+import { ensureAdminRole } from "@/server/roles";
 
 const schema = z.object({
   email: z.string().email("Введите корректный email"),
@@ -45,7 +46,8 @@ export async function registerAction(
   if (existing) return { error: "Пользователь с таким email уже существует" };
 
   const passwordHash = await bcrypt.hash(password, 10);
-  await prisma.user.create({ data: { email, passwordHash } });
+  const user = await prisma.user.create({ data: { email, passwordHash } });
+  await ensureAdminRole(user);
 
   try {
     await signIn("credentials", { email, password, redirectTo: "/tournaments" });

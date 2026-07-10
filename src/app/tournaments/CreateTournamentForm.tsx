@@ -3,10 +3,18 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-export function CreateTournamentForm() {
+export interface CreateFormLimits {
+  /** Human-readable archive size cap, e.g. "100 МБ". */
+  archiveLimitLabel: string;
+  /** null = unlimited; otherwise remaining tournament slots. */
+  slotsLeft: number | null;
+}
+
+export function CreateTournamentForm({ limits }: { limits: CreateFormLimits }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const slotFull = limits.slotsLeft !== null && limits.slotsLeft <= 0;
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -24,6 +32,18 @@ export function CreateTournamentForm() {
       setError((err as Error).message);
       setBusy(false);
     }
+  }
+
+  if (slotFull) {
+    return (
+      <div className="panel">
+        <h2>Новый топ</h2>
+        <p className="muted">
+          Достигнут лимит архивов для вашей роли. Удалите существующий в{" "}
+          <a href="/account">личном кабинете</a>, чтобы загрузить новый.
+        </p>
+      </div>
+    );
   }
 
   return (
@@ -52,7 +72,11 @@ export function CreateTournamentForm() {
         <ul>
           <li>
             Один ZIP-архив, внутри — файлы треков (можно во вложенных папках).
-            Минимум 2 файла, лимит архива — 2 ГБ.
+            Минимум 2 файла, лимит архива — {limits.archiveLimitLabel}
+            {limits.slotsLeft !== null
+              ? "; одновременно можно держать один загруженный архив"
+              : ""}
+            .
           </li>
           <li>
             <b>Аудио:</b> mp3, m4a, aac, flac, wav, ogg, opus. Название и

@@ -1,13 +1,14 @@
 import { redirect, notFound } from "next/navigation";
-import { auth } from "@/auth";
+import { currentUser } from "@/auth";
+import { can } from "@/lib/domain/permissions";
 import { getTournament } from "@/server/tournaments";
 import { RenderConstructor } from "./RenderConstructor";
 
 export default async function RenderPage({ params }: { params: { id: string } }) {
-  const session = await auth();
-  if (!session?.user) redirect("/login");
+  const user = await currentUser();
+  if (!user) redirect("/");
 
-  const t = await getTournament(session.user.id, params.id);
+  const t = await getTournament(user.id, params.id);
   if (!t) notFound();
   if (t.status !== "completed") redirect(`/tournaments/${params.id}`);
 
@@ -17,7 +18,10 @@ export default async function RenderPage({ params }: { params: { id: string } })
         <h1 style={{ margin: 0 }}>Конструктор видео — {t.title}</h1>
         <a href={`/tournaments/${params.id}`} className="muted">← к турниру</a>
       </div>
-      <RenderConstructor tournamentId={params.id} />
+      <RenderConstructor
+        tournamentId={params.id}
+        canRender={can(user.role, "render:run")}
+      />
     </div>
   );
 }

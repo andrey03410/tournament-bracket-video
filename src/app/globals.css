@@ -399,3 +399,33 @@ audio {
   padding-left: 18px;
   line-height: 1.55;
 }
+
+/* ---- phase 5: welcome screen + topbar nav ---- */
+.topbar nav a {
+  color: inherit;
+  opacity: 0.85;
+  font-size: 14px;
+}
+.topbar nav a:hover {
+  opacity: 1;
+}
+.welcome-hero {
+  margin-top: 24px;
+  padding: 36px 32px;
+}
+.welcome-hero h1 {
+  margin-top: 0;
+}
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+.feature-card h3 {
+  margin: 10px 0 6px;
+}
+.feature-card p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { userOr401, badRequest } from "@/lib/api";
+import { userOr401, permissionOr403, badRequest, forbidden, tooLarge } from "@/lib/api";
+import { formatBytes, quotasFor } from "@/lib/domain/permissions";
 import { isScheme } from "@/lib/domain/types";
 import { extractTracksFromZip } from "@/lib/upload";
 import { createTournament, listTournaments } from "@/server/tournaments";
@@ -11,21 +12,20 @@ export async function GET() {
   return NextResponse.json({ tournaments });
 }
 
-// Video archives are heavy; past this ceiling the request would die anyway —
-// fail it honestly instead.
-const MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB
-
 export async function POST(req: Request) {
-  const auth = await userOr401();
+  const auth = await permissionOr403(
+    "tournament:create",
+    "Создание турниров недоступно вашей роли",
+  );
   if ("response" in auth) return auth.response;
 
+  // Archive ceiling depends on the role (100 MB for users, 2 GB for admins).
+  // Checked twice: Content-Length up front (cheap), then the actual body size
+  // below — a understated header must not bypass the quota.
+  const maxArchiveBytes = quotasFor(auth.user.role).maxArchiveBytes;
+  const limitMsg = `Архив слишком большой (лимит ${formatBytes(maxArchiveBytes)})`;
   const contentLength = Number(req.headers.get("content-length") ?? 0);
-  if (contentLength > MAX_ARCHIVE_BYTES) {
-    return NextResponse.json(
-      { error: "Архив слишком большой (лимит 2 ГБ)" },
-      { status: 413 },
-    );
-  }
+  if (contentLength > maxArchiveBytes) return tooLarge(limitMsg);
 
   const form = await req.formData();
   const title = String(form.get("title") ?? "").trim();
@@ -38,6 +38,7 @@ export async function POST(req: Request) {
   if (!(file instanceof File)) return badRequest("Прикрепите ZIP-архив с треками");
 
   const buffer = Buffer.from(await file.arrayBuffer());
+  if (buffer.length > maxArchiveBytes) return tooLarge(limitMsg);
   let tracks;
   try {
     tracks = await extractTracksFromZip(buffer);
@@ -48,10 +49,20 @@ export async function POST(req: Request) {
     return badRequest("В архиве должно быть минимум 2 аудио- или видеофайла");
   }
 
-  const tournament = await createTournament(
-    auth.userId,
-    { title, scheme, blindMode },
-    tracks,
-  );
-  return NextResponse.json({ id: tournament.id, trackCount: tracks.length });
+  try {
+    const tournament = await createTournament(
+      auth.userId,
+      { title, scheme, blindMode },
+      tracks,
+      { maxTournaments: quotasFor(auth.user.role).maxTournaments },
+    );
+    return NextResponse.json({ id: tournament.id, trackCount: tracks.length });
+  } catch (e) {
+    if ((e as Error).message === "TOURNAMENT_LIMIT") {
+      return forbidden(
+        "Достигнут лимит архивов. Удалите существующий в личном кабинете",
+      );
+    }
+    throw e;
+  }
 }

@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { userOr401, badRequest } from "@/lib/api";
+import { userOr401, permissionOr403, badRequest, tooLarge } from "@/lib/api";
+import { formatBytes, quotasFor } from "@/lib/domain/permissions";
 import { listArts, listRecentArts, createArt, type ArtRow } from "@/server/arts";
 
 // Pool uploads are single media files; keep a sane ceiling well under the
-// tournament-archive limit.
+// tournament-archive limit. Roles with a pool quota get the tighter of the two.
 const MAX_UPLOAD_BYTES = 512 * 1024 * 1024; // 512 MB
 
 function serialize(a: {
@@ -52,15 +53,21 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const auth = await userOr401();
+  const auth = await permissionOr403(
+    "media:upload",
+    "Загрузка медиа недоступна вашей роли",
+  );
   if ("response" in auth) return auth.response;
+
+  const maxPoolBytes = quotasFor(auth.user.role).maxPoolBytes;
+  const quotaMsg =
+    maxPoolBytes === null
+      ? ""
+      : `Превышена квота пула медиа (${formatBytes(maxPoolBytes)}). Удалите лишнее в личном кабинете`;
 
   const contentLength = Number(req.headers.get("content-length") ?? 0);
   if (contentLength > MAX_UPLOAD_BYTES) {
-    return NextResponse.json(
-      { error: "Файл слишком большой (лимит 512 МБ)" },
-      { status: 413 },
-    );
+    return tooLarge("Файл слишком большой (лимит 512 МБ)");
   }
 
   const form = await req.formData();
@@ -73,6 +80,7 @@ export async function POST(req: Request) {
       fileName: file.name,
       data: Buffer.from(await file.arrayBuffer()),
       label,
+      maxPoolBytes,
     });
     return NextResponse.json(serialize({ ...art, usageCount: 0 }));
   } catch (e) {
@@ -80,6 +88,7 @@ export async function POST(req: Request) {
       return badRequest(
         "Неподдерживаемый формат: картинки jpg/png/webp/gif, видео mp4/webm/mov",
       );
+    if ((e as Error).message === "POOL_QUOTA") return tooLarge(quotaMsg);
     throw e;
   }
 }

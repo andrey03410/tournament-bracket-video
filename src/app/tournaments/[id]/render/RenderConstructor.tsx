@@ -112,7 +112,13 @@ interface JobDto {
   downloadUrl: string | null;
 }
 
-export function RenderConstructor({ tournamentId }: { tournamentId: string }) {
+export function RenderConstructor({
+  tournamentId,
+  canRender,
+}: {
+  tournamentId: string;
+  canRender: boolean;
+}) {
   const [config, setConfig] = useState<ConfigDto | null>(null);
   const [plan, setPlan] = useState<VideoPlan | null>(null);
   const [modal, setModal] = useState<ModalState>(null);
@@ -466,15 +472,23 @@ export function RenderConstructor({ tournamentId }: { tournamentId: string }) {
       <div className="panel">
         <h2>Рендер</h2>
         {error ? <div className="error">{error}</div> : null}
-        <button
-          className="btn"
-          onClick={startRender}
-          disabled={job?.status === "queued" || job?.status === "running"}
-        >
-          {job?.status === "running" || job?.status === "queued"
-            ? "Рендеринг…"
-            : "🎬 Рендерить видео"}
-        </button>
+        {!canRender ? (
+          <p className="muted">
+            Рендер в MP4 доступен только администратору. Конструктор и живое
+            превью выше работают полностью — соберите топ, а рендер запросите
+            у администратора.
+          </p>
+        ) : (
+          <button
+            className="btn"
+            onClick={startRender}
+            disabled={job?.status === "queued" || job?.status === "running"}
+          >
+            {job?.status === "running" || job?.status === "queued"
+              ? "Рендеринг…"
+              : "🎬 Рендерить видео"}
+          </button>
+        )}
 
         {job ? (
           <div style={{ marginTop: 16 }}>

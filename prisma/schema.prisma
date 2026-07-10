@@ -16,6 +16,10 @@ model User {
   id           String       @id @default(cuid())
   email        String       @unique
   passwordHash String
+  // Role name; permissions/quotas resolve through the matrix in
+  // src/lib/domain/permissions.ts. Read fresh from the DB on every request
+  // (never trusted from the JWT) so role changes apply without re-login.
+  role         String       @default("user")
   createdAt    DateTime     @default(now())
   tournaments  Tournament[]
   arts         Art[]
@@ -56,6 +60,9 @@ model Track {
   durationSec  Float?
   order        Int
   kind         String  @default("audio") // "audio" | "video"
+  // File size on disk. Float (not Int) because files may exceed 2^31 bytes.
+  // Nullable: rows created before phase 5 are backfilled lazily via stat().
+  sizeBytes    Float?
 
   renderItems RenderItem[]
 }
@@ -96,6 +103,8 @@ model Art {
   durationSec Float?
   hasAudio    Boolean @default(false)
   posterPath  String? // extracted first frame (jpg) for grid cards / thumbs
+  // File size on disk (see Track.sizeBytes); drives the pool quota check.
+  sizeBytes   Float?
   createdAt DateTime @default(now())
   // Set when the art is assigned to a render item; drives the "recent" picker block.
   lastUsedAt DateTime?

@@ -35,9 +35,11 @@ for (const t of tracks) {
 const zipPath = path.join(tmp, "ost.zip");
 zip.writeZip(zipPath);
 
+// The e2e account is an admin: verify flows exercise render and the admin
+// panel. Limited-role flows create their own throwaway "user" accounts.
 await prisma.user.deleteMany({ where: { email: EMAIL } });
 const hash = await bcrypt.hash(PASSWORD, 10);
-await prisma.user.create({ data: { email: EMAIL, passwordHash: hash } });
+await prisma.user.create({ data: { email: EMAIL, passwordHash: hash, role: "admin" } });
 await prisma.$disconnect();
 
 console.log(JSON.stringify({ email: EMAIL, password: PASSWORD, zipPath }));
