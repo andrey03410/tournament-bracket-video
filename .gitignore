@@ -1,0 +1,13 @@
+node_modules/
+.next/
+out/
+output/
+storage/
+*.db
+*.db-journal
+.env
+.DS_Store
+*.log
+.vitest/
+next-env.d.ts
+tsconfig.tsbuildinfo

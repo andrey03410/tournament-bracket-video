@@ -1,0 +1,143 @@
+// Prisma schema — tournament-bracket-video
+// MVP uses SQLite for zero-dependency local runs. Production target is Postgres:
+// switch `provider` to "postgresql" and set DATABASE_URL accordingly — the models
+// below are provider-agnostic.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  passwordHash String
+  createdAt    DateTime     @default(now())
+  tournaments  Tournament[]
+  arts         Art[]
+}
+
+// ---- Phase 1: tournament ----
+// SQLite has no native enums; enum-like fields are stored as strings and validated
+// in the app layer (see src/lib/domain/types.ts).
+
+model Tournament {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  scheme    String // "merge" | "swiss" | "round_robin"
+  blindMode Boolean  @default(false)
+  status    String   @default("draft") // "draft" | "in_progress" | "completed"
+  topSize   Int?
+  // Serialized resumable engine state (JSON string). Lets a paused tournament resume.
+  engineState String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tracks       Track[]
+  comparisons  Comparison[]
+  rankings     Ranking[]
+  renderConfig RenderConfig?
+  renderJobs   RenderJob[]
+}
+
+model Track {
+  id           String  @id @default(cuid())
+  tournamentId String
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  title        String
+  artist       String?
+  filePath     String
+  durationSec  Float?
+  order        Int
+
+  renderItems RenderItem[]
+}
+
+model Comparison {
+  id           String   @id @default(cuid())
+  tournamentId String
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  trackAId     String
+  trackBId     String
+  result       String // "a" | "b" | "draw"
+  createdAt    DateTime @default(now())
+}
+
+model Ranking {
+  id           String   @id @default(cuid())
+  tournamentId String
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  trackId      String
+  rank         Int
+  score        Float
+
+  @@unique([tournamentId, trackId])
+}
+
+// ---- Phase 2: render ----
+
+model Art {
+  id       String  @id @default(cuid())
+  userId   String
+  user     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  filePath String
+  label    String?
+  createdAt DateTime @default(now())
+
+  renderItems RenderItem[]
+}
+
+model RenderConfig {
+  id             String   @id @default(cuid())
+  tournamentId   String   @unique
+  tournament     Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  orientation    String   @default("16x9")
+  order          String   @default("desc") // "desc" (N->1) | "asc" (1->N)
+  template       String   @default("default")
+  defaultClipSec Float    @default(30)
+  introEnabled   Boolean  @default(true)
+  introText      String?
+  outroEnabled   Boolean  @default(true)
+  outroText      String?
+  updatedAt      DateTime @updatedAt
+
+  items RenderItem[]
+}
+
+model RenderItem {
+  id             String  @id @default(cuid())
+  renderConfigId String
+  renderConfig   RenderConfig @relation(fields: [renderConfigId], references: [id], onDelete: Cascade)
+  trackId        String
+  track          Track   @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  rank           Int
+  artId          String?
+  art            Art?    @relation(fields: [artId], references: [id], onDelete: SetNull)
+  clipMode       String  @default("active_snippet") // "manual" | "active_snippet" | "full"
+  clipStartSec   Float?
+  clipEndSec     Float?
+  snippetLenSec  Float?
+  // Cached active-snippet start (sec), computed via RMS analysis. null = needs (re)compute.
+  resolvedStartSec Float?
+  customLabel    String?
+
+  @@unique([renderConfigId, trackId])
+}
+
+model RenderJob {
+  id             String   @id @default(cuid())
+  tournamentId   String
+  tournament     Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  status         String   @default("queued") // "queued" | "running" | "done" | "failed"
+  progress       Float    @default(0)
+  outputPath     String?
+  error          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
