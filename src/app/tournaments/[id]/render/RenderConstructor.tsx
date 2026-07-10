@@ -4,6 +4,8 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Player } from "@remotion/player";
 import { TopVideo } from "@/remotion/TopVideo";
 import type { VideoPlan } from "@/lib/domain/video-plan";
+import { artCropStyle, type ArtCrop } from "@/lib/domain/art-crop";
+import { ArtGalleryModal, type PickResult } from "./ArtGalleryModal";
 
 // Remotion's Player generic is constrained to Record<string, unknown>; bridge our
 // fixed-shape props at this boundary.
@@ -24,6 +26,7 @@ interface ItemDto {
   customLabel: string | null;
   artId: string | null;
   artUrl: string | null;
+  artCrop: ArtCrop | null;
 }
 
 function fmtTime(sec: number | null): string {
@@ -42,11 +45,12 @@ interface ConfigDto {
   outroText: string | null;
   items: ItemDto[];
 }
-interface ArtDto {
-  id: string;
-  url: string;
-  label: string | null;
-}
+type ModalState =
+  | { kind: "manage" }
+  | { kind: "pick"; itemId: string }
+  | { kind: "crop"; itemId: string; artId: string; artUrl: string; crop: ArtCrop | null }
+  | null;
+
 interface JobDto {
   id: string;
   status: string;
@@ -58,7 +62,7 @@ interface JobDto {
 export function RenderConstructor({ tournamentId }: { tournamentId: string }) {
   const [config, setConfig] = useState<ConfigDto | null>(null);
   const [plan, setPlan] = useState<VideoPlan | null>(null);
-  const [arts, setArts] = useState<ArtDto[]>([]);
+  const [modal, setModal] = useState<ModalState>(null);
   const [job, setJob] = useState<JobDto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -76,18 +80,12 @@ export function RenderConstructor({ tournamentId }: { tournamentId: string }) {
     setPlan(data.previewPlan);
   }, [tournamentId]);
 
-  const loadArts = useCallback(async () => {
-    const res = await fetch(`/api/arts`, { cache: "no-store" });
-    if (res.ok) setArts((await res.json()).arts);
-  }, []);
-
   useEffect(() => {
     void loadConfig();
-    void loadArts();
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [loadConfig, loadArts]);
+  }, [loadConfig]);
 
   async function patchConfig(partial: Record<string, unknown>) {
     await fetch(`/api/tournaments/${tournamentId}/render/config`, {
@@ -107,11 +105,9 @@ export function RenderConstructor({ tournamentId }: { tournamentId: string }) {
     await loadConfig();
   }
 
-  async function uploadArt(file: File) {
-    const fd = new FormData();
-    fd.append("file", file);
-    const res = await fetch(`/api/arts`, { method: "POST", body: fd });
-    if (res.ok) await loadArts();
+  async function applyPick(itemId: string, res: PickResult) {
+    setModal(null);
+    await patchItem(itemId, { artId: res.artId, artCrop: res.crop });
   }
 
   function pollJob(jobId: string) {
@@ -225,28 +221,13 @@ export function RenderConstructor({ tournamentId }: { tournamentId: string }) {
       </div>
 
       <div className="panel">
-        <h2>Загрузка арта</h2>
-        <input
-          type="file"
-          accept="image/*"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) void uploadArt(f);
-          }}
-        />
-        {arts.length > 0 ? (
-          <div className="row" style={{ flexWrap: "wrap", marginTop: 12, gap: 8 }}>
-            {arts.map((a) => (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                key={a.id}
-                src={a.url}
-                alt={a.label ?? "art"}
-                style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 8 }}
-              />
-            ))}
-          </div>
-        ) : null}
+        <h2>Арты</h2>
+        <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
+          Общий пул картинок: массовая загрузка, названия для поиска, удаление.
+        </p>
+        <button className="btn secondary" onClick={() => setModal({ kind: "manage" })}>
+          🖼 Менеджер артов
+        </button>
       </div>
 
       <div className="panel">
@@ -335,36 +316,56 @@ export function RenderConstructor({ tournamentId }: { tournamentId: string }) {
             )}
 
             <label>Арт</label>
-            <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
-              <button
-                className={`btn ${it.artId ? "ghost" : "secondary"}`}
-                onClick={() => patchItem(it.id, { artId: null })}
-              >
-                Без арта
-              </button>
-              {arts.map((a) => (
+            <div className="row" style={{ gap: 12, alignItems: "center" }}>
+              <div className="item-art-thumb">
+                {it.artUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={it.artUrl} alt="art" style={artCropStyle(it.artCrop)} />
+                ) : (
+                  <span
+                    className="muted"
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 12,
+                    }}
+                  >
+                    нет арта
+                  </span>
+                )}
+              </div>
+              <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
                 <button
-                  key={a.id}
-                  onClick={() => patchItem(it.id, { artId: a.id })}
-                  style={{
-                    padding: 0,
-                    border:
-                      it.artId === a.id
-                        ? "2px solid var(--accent)"
-                        : "2px solid transparent",
-                    borderRadius: 8,
-                    background: "none",
-                    cursor: "pointer",
-                  }}
+                  className="btn secondary"
+                  onClick={() => setModal({ kind: "pick", itemId: it.id })}
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={a.url}
-                    alt="art"
-                    style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 6, display: "block" }}
-                  />
+                  {it.artId ? "Заменить" : "Выбрать арт"}
                 </button>
-              ))}
+                {it.artId && it.artUrl ? (
+                  <>
+                    <button
+                      className="btn secondary"
+                      onClick={() =>
+                        setModal({
+                          kind: "crop",
+                          itemId: it.id,
+                          artId: it.artId!,
+                          artUrl: it.artUrl!,
+                          crop: it.artCrop,
+                        })
+                      }
+                    >
+                      ✂ Обрезать
+                    </button>
+                    <button className="btn ghost" onClick={() => patchItem(it.id, { artId: null })}>
+                      Убрать
+                    </button>
+                  </>
+                ) : null}
+              </div>
             </div>
           </div>
         ))}
@@ -400,6 +401,29 @@ export function RenderConstructor({ tournamentId }: { tournamentId: string }) {
           </div>
         ) : null}
       </div>
+
+      {modal ? (
+        <ArtGalleryModal
+          mode={modal.kind}
+          cropTarget={
+            modal.kind === "crop"
+              ? { artId: modal.artId, artUrl: modal.artUrl, crop: modal.crop }
+              : undefined
+          }
+          onPick={
+            modal.kind === "pick"
+              ? (res) => void applyPick(modal.itemId, res)
+              : modal.kind === "crop"
+                ? (res) => {
+                    setModal(null);
+                    void patchItem(modal.itemId, { artCrop: res.crop });
+                  }
+                : undefined
+          }
+          onClose={() => setModal(null)}
+          onPoolChange={() => void loadConfig()}
+        />
+      ) : null}
     </>
   );
 }

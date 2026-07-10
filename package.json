@@ -27,6 +27,7 @@
     "next-auth": "5.0.0-beta.25",
     "react": "18.3.1",
     "react-dom": "18.3.1",
+    "react-easy-crop": "^6.2.2",
     "remotion": "^4.0.230",
     "zod": "^3.23.8"
   },
@@ -37,6 +38,7 @@
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "prisma": "^5.22.0",
+    "puppeteer-core": "^25.3.0",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
   }

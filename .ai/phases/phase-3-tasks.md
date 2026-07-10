@@ -4,24 +4,26 @@
 
 ## Задачи
 
-- [ ] T3.1 Схема: `Art.lastUsedAt`, `RenderItem.artCropX/Y/W/H` (+ `prisma db push`).
-- [ ] T3.2 Домен `src/lib/domain/art-crop.ts`: валидация/нормализация кропа +
+- [x] T3.1 Схема: `Art.lastUsedAt`, `RenderItem.artCropX/Y/W/H` (+ `prisma db push`).
+- [x] T3.2 Домен `src/lib/domain/art-crop.ts`: валидация/нормализация кропа +
       чистая функция кроп → CSS-позиционирование. Юнит-тесты.
-- [ ] T3.3 Прокидывание `artCrop`: `render-assemble` → `video-plan` → сегменты.
+- [x] T3.3 Прокидывание `artCrop`: `render-assemble` → `video-plan` → сегменты.
       Юнит-тесты.
-- [ ] T3.4 `TopVideo`: применение кропа к арту (общий код превью и рендера).
-- [ ] T3.5 Сервис `src/server/arts.ts`: листинг (поиск/пагинация/recent/usageCount),
+- [x] T3.4 `TopVideo`: применение кропа к арту (общий код превью и рендера).
+- [x] T3.5 Сервис `src/server/arts.ts`: листинг (поиск/пагинация/recent/usageCount),
       загрузка (label из имени файла), rename, delete (файл + чистка кропов).
       Тонкие роуты: GET/POST `/api/arts`, PATCH/DELETE `/api/arts/[id]`;
       PATCH `/api/render-items/[id]` — `artCrop`, сброс кропа при смене арта,
       обновление `lastUsedAt`.
-- [ ] T3.6 Интеграционные тесты сервисного слоя на реальной БД (все сценарии
+- [x] T3.6 Интеграционные тесты сервисного слоя на реальной БД (все сценарии
       из спеки: листинг, загрузка, rename, delete, назначение, кроп, чужие данные).
-- [ ] T3.7 UI: `ArtGalleryModal` (режимы manage/pick, drag&drop, мультизагрузка,
+- [x] T3.7 UI: `ArtGalleryModal` (режимы manage/pick, drag&drop, мультизагрузка,
       поиск с дебаунсом, «Недавние», бесконечная подгрузка) + кроп-шаг
       (`react-easy-crop`) + интеграция в `RenderConstructor` (превью с кропом,
       «Заменить/Обрезать/Убрать», кнопка «Менеджер артов»).
-- [ ] T3.8 Ручная верификация в запущенном приложении + обновление README.
+- [x] T3.8 Верификация в запущенном приложении (headless Chrome, полный
+      UI-сценарий + негативные HTTP-пробы; рецепт — `.claude/skills/verify/`)
+      + обновление README.
 
 ## Готово, когда
 

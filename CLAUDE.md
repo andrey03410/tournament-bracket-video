@@ -34,11 +34,13 @@ tournament-bracket-video/
 
 ## Статус
 
-MVP реализован (Фаза 1 — турнирная сетка, Фаза 2 — рендер). Стек: Next.js + Prisma
-(SQLite) + Auth.js + Remotion + ffmpeg-static. Запуск и инструкции — в
-[`README.md`](README.md). Доменная логика покрыта тестами (`npm test`, 59 тестов) +
-интеграционный тест на БД; ffmpeg-пайплайн и полный HTTP E2E (логин → загрузка →
-сравнения → финал → конфиг рендера) провалидированы вручную.
+MVP реализован (Фаза 1 — турнирная сетка, Фаза 2 — рендер, Фаза 3 — менеджер
+артов + пикер + недеструктивная обрезка 16:9). Стек: Next.js + Prisma (SQLite) +
+Auth.js + Remotion + ffmpeg-static + react-easy-crop. Запуск и инструкции — в
+[`README.md`](README.md). Доменная логика и сервисный слой покрыты тестами
+(`npm test`, 98 тестов, включая интеграционные на реальной БД); ffmpeg-пайплайн,
+полный HTTP E2E и UI-сценарий артов (headless Chrome) провалидированы — рецепт
+в [`.claude/skills/verify/`](.claude/skills/verify/SKILL.md).
 
 Единственный шаг, не выполненный в песочнице, — headless-рендер Remotion (нужен
 `chrome-headless-shell`, сеть окружения блокирует загрузку). См.
