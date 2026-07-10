@@ -2,13 +2,31 @@ import { NextResponse } from "next/server";
 import { userOr401, badRequest } from "@/lib/api";
 import { listArts, listRecentArts, createArt, type ArtRow } from "@/server/arts";
 
-function serialize(a: ArtRow) {
+// Pool uploads are single media files; keep a sane ceiling well under the
+// tournament-archive limit.
+const MAX_UPLOAD_BYTES = 512 * 1024 * 1024; // 512 MB
+
+function serialize(a: {
+  id: string;
+  label: string | null;
+  kind: string;
+  durationSec?: number | null;
+  hasAudio?: boolean;
+  posterPath?: string | null;
+  usageCount?: number;
+  lastUsedAt?: Date | null;
+}) {
   return {
     id: a.id,
     label: a.label,
+    kind: a.kind,
     url: `/api/arts/${a.id}`,
-    usageCount: a.usageCount,
-    lastUsedAt: a.lastUsedAt,
+    posterUrl:
+      a.kind === "video" && a.posterPath ? `/api/arts/${a.id}?poster=1` : null,
+    durationSec: a.durationSec ?? null,
+    hasAudio: a.hasAudio ?? false,
+    usageCount: a.usageCount ?? 0,
+    lastUsedAt: a.lastUsedAt ?? null,
   };
 }
 
@@ -23,8 +41,10 @@ export async function GET(req: Request) {
   }
 
   const limitRaw = Number(params.get("limit"));
+  const kindRaw = params.get("kind");
   const { arts, nextCursor } = await listArts(auth.userId, {
     q: params.get("q") ?? undefined,
+    kind: kindRaw === "image" || kindRaw === "video" ? kindRaw : undefined,
     cursor: params.get("cursor") ?? undefined,
     limit: Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined,
   });
@@ -35,10 +55,18 @@ export async function POST(req: Request) {
   const auth = await userOr401();
   if ("response" in auth) return auth.response;
 
+  const contentLength = Number(req.headers.get("content-length") ?? 0);
+  if (contentLength > MAX_UPLOAD_BYTES) {
+    return NextResponse.json(
+      { error: "Файл слишком большой (лимит 512 МБ)" },
+      { status: 413 },
+    );
+  }
+
   const form = await req.formData();
   const file = form.get("file");
   const label = String(form.get("label") ?? "").trim() || null;
-  if (!(file instanceof File)) return badRequest("Прикрепите изображение");
+  if (!(file instanceof File)) return badRequest("Прикрепите изображение или видео");
 
   try {
     const art = await createArt(auth.userId, {
@@ -46,10 +74,12 @@ export async function POST(req: Request) {
       data: Buffer.from(await file.arrayBuffer()),
       label,
     });
-    return NextResponse.json({ id: art.id, url: `/api/arts/${art.id}`, label: art.label });
+    return NextResponse.json(serialize({ ...art, usageCount: 0 }));
   } catch (e) {
     if ((e as Error).message === "BAD_EXT")
-      return badRequest("Неподдерживаемый формат изображения");
+      return badRequest(
+        "Неподдерживаемый формат: картинки jpg/png/webp/gif, видео mp4/webm/mov",
+      );
     throw e;
   }
 }

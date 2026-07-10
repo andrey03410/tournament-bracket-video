@@ -13,9 +13,13 @@ const schema = z.object({
 });
 
 const SERVICE_ERRORS: Record<string, string> = {
-  ART_NOT_FOUND: "Арт не найден",
+  ART_NOT_FOUND: "Медиа не найдено",
   INVALID_CROP: "Некорректная рамка обрезки",
-  NO_ART: "Сначала выберите арт для позиции",
+  NO_ART: "Сначала выберите медиа для позиции",
+  INVALID_AUDIO_SOURCE: "Некорректный источник звука",
+  NO_MEDIA_AUDIO: "У выбранного медиа нет аудиодорожки",
+  NO_VIDEO: "Старт видеоряда доступен только для видео",
+  INVALID_START: "Некорректный старт видеоряда",
 };
 
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
@@ -26,11 +30,14 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   const parsed = schema.safeParse(body);
   if (!parsed.success) return badRequest("Некорректные данные элемента");
 
-  // artCrop is validated in the service (parseArtCrop) so its rules live in one
-  // place; forward it only when the key is present (null = explicit reset).
+  // artCrop / audioSource / mediaStartSec are validated in the service (their
+  // rules depend on the attached media and live in one place); forward each
+  // only when the key is present (null = explicit reset).
   const patch: RenderItemPatch = { ...parsed.data };
-  if (typeof body === "object" && body !== null && "artCrop" in body) {
-    patch.artCrop = (body as Record<string, unknown>).artCrop;
+  if (typeof body === "object" && body !== null) {
+    for (const key of ["artCrop", "audioSource", "mediaStartSec"] as const) {
+      if (key in body) patch[key] = (body as Record<string, unknown>)[key];
+    }
   }
 
   try {

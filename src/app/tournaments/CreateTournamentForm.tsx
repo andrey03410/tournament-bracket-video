@@ -41,11 +41,42 @@ export function CreateTournamentForm() {
 
       <label className="row" style={{ gap: 8, marginTop: 14 }}>
         <input type="checkbox" name="blindMode" />
-        <span>Слепой режим (скрывать названия во время сравнения)</span>
+        <span>Слепой режим (скрывать названия — и видеоряд — во время сравнения)</span>
       </label>
 
-      <label>ZIP-архив с OST</label>
+      <label>ZIP-архив с треками (аудио и/или видео)</label>
       <input name="file" type="file" accept=".zip,application/zip" required />
+
+      <details className="hint-details">
+        <summary>Как подготовить архив</summary>
+        <ul>
+          <li>
+            Один ZIP-архив, внутри — файлы треков (можно во вложенных папках).
+            Минимум 2 файла, лимит архива — 2 ГБ.
+          </li>
+          <li>
+            <b>Аудио:</b> mp3, m4a, aac, flac, wav, ogg, opus. Название и
+            исполнитель берутся из тегов (ID3), иначе — из имени файла.
+          </li>
+          <li>
+            <b>Видео:</b> mp4, webm, mov. Рекомендуем MP4 (H.264 + AAC) — он
+            гарантированно играет в браузере и в рендере. Название — из имени
+            файла. Видео без звука тоже допустимо.
+          </li>
+          <li>
+            Аудио и видео можно смешивать в одном архиве — такие треки будут
+            сравниваться друг с другом наравне.
+          </li>
+          <li>
+            В слепом режиме видеоряд скрывается: видео-трек играет как аудио,
+            пока не нажмёте «Показать названия».
+          </li>
+          <li>
+            Громкость не нормализуется: если звук видео заметно тише/громче
+            музыки, это будет слышно и в сравнении, и в рендере.
+          </li>
+        </ul>
+      </details>
 
       {error ? <div className="error">{error}</div> : null}
       <button className="btn" type="submit" disabled={busy} style={{ marginTop: 18 }}>

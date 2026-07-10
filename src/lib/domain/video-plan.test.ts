@@ -7,14 +7,23 @@ import {
   LABEL_DELAY_SEC,
   LABEL_HOLD_SEC,
   type PlanItemInput,
+  type SegmentVisual,
 } from "./video-plan";
+
+const NONE_VISUAL: SegmentVisual = {
+  kind: "none",
+  path: null,
+  crop: null,
+  startSec: 0,
+  loopSec: null,
+};
 
 function items(n: number): PlanItemInput[] {
   return Array.from({ length: n }, (_, i) => ({
     trackId: `t${i + 1}`,
     rank: i + 1,
     label: `${i + 1} - Track ${i + 1}`,
-    artPath: null,
+    visual: NONE_VISUAL,
     audioPath: `/a/${i + 1}.mp3`,
     clipStartSec: 0,
     clipSec: 30,
@@ -109,24 +118,39 @@ describe("buildVideoPlan", () => {
   });
 });
 
-describe("artCrop passthrough", () => {
+describe("visual passthrough", () => {
   const baseConfig = {
     order: "asc" as const,
     introEnabled: false,
     outroEnabled: false,
   };
 
-  it("carries the crop into the segment", () => {
-    const withCrop = items(1).map((it) => ({
-      ...it,
-      artCrop: { x: 0.25, y: 0.25, w: 0.5, h: 0.5 },
-    }));
-    const plan = buildVideoPlan(baseConfig, withCrop);
-    expect(plan.segments[0].artCrop).toEqual({ x: 0.25, y: 0.25, w: 0.5, h: 0.5 });
+  it("carries an image visual with its crop into the segment", () => {
+    const visual: SegmentVisual = {
+      kind: "image",
+      path: "/arts/a1",
+      crop: { x: 0.25, y: 0.25, w: 0.5, h: 0.5 },
+      startSec: 0,
+      loopSec: null,
+    };
+    const plan = buildVideoPlan(baseConfig, items(1).map((it) => ({ ...it, visual })));
+    expect(plan.segments[0].visual).toEqual(visual);
   });
 
-  it("defaults to null when the item has no crop", () => {
+  it("carries a looping video visual into the segment", () => {
+    const visual: SegmentVisual = {
+      kind: "video",
+      path: "/arts/v1",
+      crop: null,
+      startSec: 5,
+      loopSec: 15,
+    };
+    const plan = buildVideoPlan(baseConfig, items(1).map((it) => ({ ...it, visual })));
+    expect(plan.segments[0].visual).toEqual(visual);
+  });
+
+  it("keeps the placeholder visual as-is", () => {
     const plan = buildVideoPlan(baseConfig, items(1));
-    expect(plan.segments[0].artCrop).toBeNull();
+    expect(plan.segments[0].visual).toEqual(NONE_VISUAL);
   });
 });

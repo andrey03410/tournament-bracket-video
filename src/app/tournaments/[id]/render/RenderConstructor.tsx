@@ -11,12 +11,21 @@ import { ArtGalleryModal, type PickResult } from "./ArtGalleryModal";
 // fixed-shape props at this boundary.
 const PlayerComp = TopVideo as unknown as React.FC<Record<string, unknown>>;
 
+interface ItemArtDto {
+  kind: "image" | "video";
+  durationSec: number | null;
+  hasAudio: boolean;
+  posterUrl: string | null;
+}
+
 interface ItemDto {
   id: string;
   trackId: string;
   rank: number;
   title: string;
   artist: string | null;
+  trackKind: "audio" | "video";
+  audioUrl: string;
   clipMode: "manual" | "active_snippet" | "full";
   clipStartSec: number | null;
   clipEndSec: number | null;
@@ -26,7 +35,45 @@ interface ItemDto {
   customLabel: string | null;
   artId: string | null;
   artUrl: string | null;
+  art: ItemArtDto | null;
   artCrop: ArtCrop | null;
+  audioSource: "track" | "media";
+  mediaStartSec: number | null;
+}
+
+/** Per-position thumbnail: image, video poster, or the track's own footage. */
+function ItemThumb({ it }: { it: ItemDto }) {
+  const style = artCropStyle(it.artCrop);
+  if (it.art?.kind === "video" && it.artUrl) {
+    return it.art.posterUrl ? (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={it.art.posterUrl} alt="video" style={style} />
+    ) : (
+      <video src={it.artUrl} muted preload="metadata" style={style} />
+    );
+  }
+  if (it.artUrl) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={it.artUrl} alt="art" style={style} />;
+  }
+  if (it.trackKind === "video") {
+    return <video src={it.audioUrl} muted preload="metadata" style={style} />;
+  }
+  return (
+    <span
+      className="muted"
+      style={{
+        position: "absolute",
+        inset: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: 12,
+      }}
+    >
+      нет медиа
+    </span>
+  );
 }
 
 function fmtTime(sec: number | null): string {
@@ -48,7 +95,13 @@ interface ConfigDto {
 type ModalState =
   | { kind: "manage" }
   | { kind: "pick"; itemId: string }
-  | { kind: "crop"; itemId: string; artId: string; artUrl: string; crop: ArtCrop | null }
+  | {
+      kind: "crop";
+      itemId: string;
+      url: string;
+      mediaKind: "image" | "video";
+      crop: ArtCrop | null;
+    }
   | null;
 
 interface JobDto {
@@ -221,12 +274,14 @@ export function RenderConstructor({ tournamentId }: { tournamentId: string }) {
       </div>
 
       <div className="panel">
-        <h2>Арты</h2>
+        <h2>Медиа</h2>
         <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
-          Общий пул картинок: массовая загрузка, названия для поиска, удаление.
+          Общий пул картинок и видео: массовая загрузка, названия для поиска,
+          удаление. Видео можно вставить на позицию как видеоряд (звук — от трека
+          или от самого видео).
         </p>
         <button className="btn secondary" onClick={() => setModal({ kind: "manage" })}>
-          🖼 Менеджер артов
+          🖼 Менеджер медиа
         </button>
       </div>
 
@@ -315,55 +370,92 @@ export function RenderConstructor({ tournamentId }: { tournamentId: string }) {
               </div>
             )}
 
-            <label>Арт</label>
+            <label>Визуал</label>
             <div className="row" style={{ gap: 12, alignItems: "center" }}>
               <div className="item-art-thumb">
-                {it.artUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={it.artUrl} alt="art" style={artCropStyle(it.artCrop)} />
-                ) : (
-                  <span
-                    className="muted"
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 12,
-                    }}
-                  >
-                    нет арта
-                  </span>
-                )}
+                <ItemThumb it={it} />
               </div>
-              <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
-                <button
-                  className="btn secondary"
-                  onClick={() => setModal({ kind: "pick", itemId: it.id })}
-                >
-                  {it.artId ? "Заменить" : "Выбрать арт"}
-                </button>
-                {it.artId && it.artUrl ? (
-                  <>
+              <div style={{ flex: 1 }}>
+                <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+                  <button
+                    className="btn secondary"
+                    onClick={() => setModal({ kind: "pick", itemId: it.id })}
+                  >
+                    {it.artId ? "Заменить" : "Выбрать медиа"}
+                  </button>
+                  {it.artId || it.trackKind === "video" ? (
                     <button
                       className="btn secondary"
                       onClick={() =>
                         setModal({
                           kind: "crop",
                           itemId: it.id,
-                          artId: it.artId!,
-                          artUrl: it.artUrl!,
+                          url: it.artUrl ?? it.audioUrl,
+                          mediaKind:
+                            it.art?.kind === "video" || (!it.artId && it.trackKind === "video")
+                              ? "video"
+                              : "image",
                           crop: it.artCrop,
                         })
                       }
                     >
                       ✂ Обрезать
                     </button>
+                  ) : null}
+                  {it.artId ? (
                     <button className="btn ghost" onClick={() => patchItem(it.id, { artId: null })}>
-                      Убрать
+                      {it.trackKind === "video" ? "Вернуть видеоряд трека" : "Убрать"}
                     </button>
-                  </>
+                  ) : null}
+                </div>
+
+                {it.art?.kind === "video" ? (
+                  <p className="muted" style={{ fontSize: 13, margin: "8px 0 0" }}>
+                    🎬 видео{it.art.durationSec ? ` · ${fmtTime(it.art.durationSec)}` : ""}
+                    {it.art.hasAudio ? "" : " · без звука"}
+                  </p>
+                ) : !it.artId && it.trackKind === "video" ? (
+                  <p className="muted" style={{ fontSize: 13, margin: "8px 0 0" }}>
+                    🎬 собственный видеоряд трека
+                  </p>
+                ) : null}
+
+                {it.art?.kind === "video" && it.art.hasAudio ? (
+                  <div style={{ marginTop: 8, maxWidth: 320 }}>
+                    <label>Звук позиции</label>
+                    <select
+                      value={it.audioSource}
+                      onChange={(e) => patchItem(it.id, { audioSource: e.target.value })}
+                    >
+                      <option value="track">Трек ({it.trackKind === "video" ? "звук видео-трека" : "OST"})</option>
+                      <option value="media">Звук вставленного видео</option>
+                    </select>
+                    <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                      «Звук видео» полностью подменяет трек на этой позиции:
+                      фрагмент выбирается по видео.
+                    </p>
+                  </div>
+                ) : null}
+
+                {it.art?.kind === "video" && it.audioSource === "track" ? (
+                  <div style={{ marginTop: 8, maxWidth: 320 }}>
+                    <label>Старт видеоряда (сек)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.1}
+                      defaultValue={it.mediaStartSec ?? 0}
+                      onBlur={(e) =>
+                        patchItem(it.id, {
+                          mediaStartSec: e.target.value ? Number(e.target.value) : null,
+                        })
+                      }
+                    />
+                    <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                      Видео идёт без звука поверх трека; если оно короче
+                      фрагмента — зациклится.
+                    </p>
+                  </div>
                 ) : null}
               </div>
             </div>
@@ -407,7 +499,7 @@ export function RenderConstructor({ tournamentId }: { tournamentId: string }) {
           mode={modal.kind}
           cropTarget={
             modal.kind === "crop"
-              ? { artId: modal.artId, artUrl: modal.artUrl, crop: modal.crop }
+              ? { artUrl: modal.url, kind: modal.mediaKind, crop: modal.crop }
               : undefined
           }
           onPick={

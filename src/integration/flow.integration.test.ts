@@ -134,7 +134,7 @@ describe("Phase 1 + Phase 2 integration", () => {
       clipEndSec: it.clipEndSec,
       snippetLenSec: it.snippetLenSec,
       durationSec: it.track.durationSec,
-      artRef: null,
+      visual: null,
       audioRef: `/api/tracks/${it.trackId}/audio`,
     }));
     const plan = buildVideoPlan(

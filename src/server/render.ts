@@ -3,15 +3,27 @@ import path from "node:path";
 import { mkdir, copyFile } from "node:fs/promises";
 import { prisma } from "@/lib/db";
 import { absPath, renderOutputPath, STORAGE_ROOT } from "@/lib/storage";
-import { clipAudio, findActiveSnippet, probeDurationSec } from "@/lib/audio";
+import {
+  clipAudio,
+  clipVideo,
+  findActiveSnippet,
+  probeDurationSec,
+  writeSilence,
+} from "@/lib/audio";
 import {
   assemblePlanItems,
   resolveClipSec,
   type AssembleItem,
+  type AssembleVisual,
   type ClipMode,
 } from "@/lib/render-assemble";
 import { buildVideoPlan, type DisplayOrder } from "@/lib/domain/video-plan";
 import { cropFromColumns } from "@/lib/domain/art-crop";
+import {
+  mediaAudioAvailable,
+  resolveFootage,
+  type PoolMediaInfo,
+} from "@/lib/domain/position-media";
 
 /** Create a default render config + items (top-N) for a completed tournament. */
 export async function ensureRenderConfig(userId: string, tournamentId: string) {
@@ -59,63 +71,94 @@ export async function getRenderConfig(userId: string, tournamentId: string) {
 type LoadedConfig = NonNullable<Awaited<ReturnType<typeof getRenderConfig>>>;
 type LoadedItem = LoadedConfig["items"][number];
 
-function toAssembleItem(
-  it: LoadedItem,
-  defaultClipSec: number,
-  audioRef: string,
-  artRef: string | null,
-): AssembleItem {
+/** Which files feed the position: attached media info + the effective audio source. */
+function resolveItemSources(it: LoadedItem) {
+  const media: PoolMediaInfo | null = it.art
+    ? {
+        kind: it.art.kind as PoolMediaInfo["kind"],
+        durationSec: it.art.durationSec,
+        hasAudio: it.art.hasAudio,
+      }
+    : null;
+  const audioFromMedia = it.audioSource === "media" && mediaAudioAvailable(media);
   return {
-    trackId: it.trackId,
-    rank: it.rank,
-    title: it.track.title,
-    artist: it.track.artist,
-    customLabel: it.customLabel,
-    clipMode: it.clipMode as ClipMode,
-    clipStartSec: it.clipStartSec,
-    clipEndSec: it.clipEndSec,
-    snippetLenSec: it.snippetLenSec,
-    durationSec: it.track.durationSec,
-    resolvedStartSec: it.resolvedStartSec,
-    artRef,
-    artCrop: cropFromColumns(it.artCropX, it.artCropY, it.artCropW, it.artCropH),
-    audioRef,
+    media,
+    audioFromMedia,
+    audioFilePath: audioFromMedia ? it.art!.filePath : it.track.filePath,
+    audioDurationSec: audioFromMedia ? it.art!.durationSec : it.track.durationSec,
   };
 }
 
+/** The position's visual for the in-browser preview (URL asset mode). */
+function previewVisual(it: LoadedItem, audioFromMedia: boolean): AssembleVisual | null {
+  const crop = cropFromColumns(it.artCropX, it.artCropY, it.artCropW, it.artCropH);
+  if (it.art) {
+    const ref = `/api/arts/${it.artId}`;
+    if (it.art.kind === "video") {
+      return {
+        kind: "video",
+        ref,
+        crop,
+        startSec: it.mediaStartSec ?? 0,
+        footageDurationSec: it.art.durationSec,
+        syncedToAudio: audioFromMedia,
+      };
+    }
+    return { kind: "image", ref, crop };
+  }
+  if (it.track.kind === "video") {
+    // A video track shows its own footage, synced to its own audio clip.
+    return {
+      kind: "video",
+      ref: `/api/tracks/${it.trackId}/audio`,
+      crop,
+      footageDurationSec: it.track.durationSec,
+      syncedToAudio: true,
+    };
+  }
+  return null;
+}
+
 /**
- * Ensure each track has a known duration, and that active-snippet items have a
- * cached RMS-resolved start. Runs the (cheap-ish) ffmpeg analysis only for rows
- * that still need it, so it's safe to call on every config load.
+ * Ensure each audio source has a known duration, and that active-snippet items
+ * have a cached RMS-resolved start. Runs the (cheap-ish) ffmpeg analysis only
+ * for rows that still need it, so it's safe to call on every config load.
  */
 export async function resolveActiveSnippets(userId: string, tournamentId: string) {
   const config = await getRenderConfig(userId, tournamentId);
   if (!config) return;
 
   for (const it of config.items) {
-    const trackAbs = absPath(it.track.filePath);
+    const s = resolveItemSources(it);
+    const audioAbs = absPath(s.audioFilePath);
 
-    let duration = it.track.durationSec;
-    if (duration == null) {
-      duration = await probeDurationSec(trackAbs);
+    if (s.audioDurationSec == null) {
+      const duration = await probeDurationSec(audioAbs);
       if (duration != null) {
-        await prisma.track.update({
-          where: { id: it.trackId },
-          data: { durationSec: duration },
-        });
+        if (s.audioFromMedia) {
+          await prisma.art.update({
+            where: { id: it.artId! },
+            data: { durationSec: duration },
+          });
+        } else {
+          await prisma.track.update({
+            where: { id: it.trackId },
+            data: { durationSec: duration },
+          });
+        }
       }
     }
 
     if (it.clipMode === "active_snippet" && it.resolvedStartSec == null) {
       const clipSec = it.snippetLenSec ?? config.defaultClipSec;
       try {
-        const snip = await findActiveSnippet(trackAbs, clipSec);
+        const snip = await findActiveSnippet(audioAbs, clipSec);
         await prisma.renderItem.update({
           where: { id: it.id },
           data: { resolvedStartSec: snip.startSec },
         });
       } catch {
-        // leave null; render will fall back to start of track
+        // e.g. a soundless video: leave null; playback falls back to start 0
       }
     }
   }
@@ -123,14 +166,26 @@ export async function resolveActiveSnippets(userId: string, tournamentId: string
 
 /** Build a preview plan (url asset mode) for the in-browser Remotion Player. */
 export function buildPreviewPlan(config: LoadedConfig) {
-  const items: AssembleItem[] = config.items.map((it) =>
-    toAssembleItem(
-      it,
-      config.defaultClipSec,
-      `/api/tracks/${it.trackId}/audio`,
-      it.artId ? `/api/arts/${it.artId}` : null,
-    ),
-  );
+  const items: AssembleItem[] = config.items.map((it) => {
+    const s = resolveItemSources(it);
+    return {
+      trackId: it.trackId,
+      rank: it.rank,
+      title: it.track.title,
+      artist: it.track.artist,
+      customLabel: it.customLabel,
+      clipMode: it.clipMode as ClipMode,
+      clipStartSec: it.clipStartSec,
+      clipEndSec: it.clipEndSec,
+      snippetLenSec: it.snippetLenSec,
+      durationSec: s.audioDurationSec,
+      resolvedStartSec: it.resolvedStartSec,
+      visual: previewVisual(it, s.audioFromMedia),
+      audioRef: s.audioFromMedia
+        ? `/api/arts/${it.artId}`
+        : `/api/tracks/${it.trackId}/audio`,
+    };
+  });
 
   const planItems = assemblePlanItems(items, { defaultClipSec: config.defaultClipSec });
   return buildVideoPlan(
@@ -188,31 +243,98 @@ async function runRender(jobId: string): Promise<void> {
   const n = config.items.length || 1;
   for (let i = 0; i < config.items.length; i++) {
     const it = config.items[i];
-    const trackAbs = absPath(it.track.filePath);
+    const s = resolveItemSources(it);
+    const audioAbs = absPath(s.audioFilePath);
     const mode = it.clipMode as ClipMode;
 
-    // Determine duration (needed for "full"), preferring the stored value.
-    let duration = it.track.durationSec;
-    if (mode === "full" && duration == null) duration = await probeDurationSec(trackAbs);
+    // Duration of the audio source: needed for "full" mode and end clamping.
+    let audioDuration = s.audioDurationSec;
+    if (audioDuration == null) audioDuration = await probeDurationSec(audioAbs);
 
-    const clipSec = resolveClipSec(toAssembleItem(it, config.defaultClipSec, "", null), {
-      defaultClipSec: config.defaultClipSec,
-    });
+    let clipSec = resolveClipSec(
+      {
+        trackId: it.trackId,
+        rank: it.rank,
+        title: it.track.title,
+        artist: it.track.artist,
+        customLabel: it.customLabel,
+        clipMode: mode,
+        clipStartSec: it.clipStartSec,
+        clipEndSec: it.clipEndSec,
+        snippetLenSec: it.snippetLenSec,
+        durationSec: audioDuration,
+        visual: null,
+        audioRef: "",
+      },
+      { defaultClipSec: config.defaultClipSec },
+    );
 
     let start = 0;
     if (mode === "manual") start = it.clipStartSec ?? 0;
     else if (mode === "active_snippet") {
-      start = it.resolvedStartSec ?? (await findActiveSnippet(trackAbs, clipSec)).startSec;
+      start =
+        it.resolvedStartSec ??
+        (await findActiveSnippet(audioAbs, clipSec)
+          .then((snip) => snip.startSec)
+          .catch(() => 0)); // soundless video track -> start at 0
     }
+    if (audioDuration != null && audioDuration > 0) {
+      clipSec = Math.min(clipSec, Math.max(0.5, audioDuration - start));
+    }
+    clipSec = Math.max(0.5, clipSec);
 
     const audioBase = `${it.trackId}.aac`;
-    await clipAudio(trackAbs, start, clipSec, path.join(publicDir, audioBase));
+    try {
+      await clipAudio(audioAbs, start, clipSec, path.join(publicDir, audioBase));
+    } catch {
+      // no audio stream (soundless video track) -> silent segment
+      await writeSilence(clipSec, path.join(publicDir, audioBase));
+    }
 
-    let artBase: string | null = null;
-    if (it.art) {
+    // Visual: image copied as-is; video footage pre-clipped to the used window.
+    const crop = cropFromColumns(it.artCropX, it.artCropY, it.artCropW, it.artCropH);
+    let visual: AssembleVisual | null = null;
+    if (it.art && it.art.kind === "image") {
       const ext = path.extname(it.art.filePath) || ".jpg";
-      artBase = `${it.artId}${ext}`;
+      const artBase = `${it.artId}${ext}`;
       await copyFile(absPath(it.art.filePath), path.join(publicDir, artBase));
+      visual = { kind: "image", ref: artBase, crop };
+    } else {
+      const footageRel = it.art
+        ? it.art.filePath
+        : it.track.kind === "video"
+          ? it.track.filePath
+          : null;
+      if (footageRel) {
+        const footageAbs = absPath(footageRel);
+        const visualBase = `${it.trackId}-visual.mp4`;
+        // Footage synced to the audio (same file provides both) plays the exact
+        // audio window; a visual-only video plays from its own offset and loops.
+        const synced = it.art ? s.audioFromMedia : true;
+        if (synced) {
+          await clipVideo(footageAbs, start, clipSec, path.join(publicDir, visualBase));
+          visual = {
+            kind: "video",
+            ref: visualBase,
+            crop,
+            startSec: 0,
+            footageDurationSec: clipSec,
+          };
+        } else {
+          let footageDur = it.art!.durationSec;
+          if (footageDur == null) footageDur = await probeDurationSec(footageAbs);
+          const footage = resolveFootage(it.mediaStartSec ?? 0, footageDur, clipSec);
+          const cutLen = footage.loopSec ?? clipSec;
+          await clipVideo(footageAbs, footage.startSec, cutLen, path.join(publicDir, visualBase));
+          visual = {
+            kind: "video",
+            ref: visualBase,
+            crop,
+            startSec: 0,
+            footageDurationSec: cutLen,
+          };
+        }
+      }
     }
 
     // Audio is pre-clipped, so the composition plays it from 0 for clipSec.
@@ -227,8 +349,7 @@ async function runRender(jobId: string): Promise<void> {
       clipEndSec: clipSec,
       snippetLenSec: null,
       durationSec: clipSec,
-      artRef: artBase,
-      artCrop: cropFromColumns(it.artCropX, it.artCropY, it.artCropW, it.artCropH),
+      visual,
       audioRef: audioBase,
     });
 

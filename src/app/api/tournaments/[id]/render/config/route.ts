@@ -27,6 +27,7 @@ function serialize(config: NonNullable<Awaited<ReturnType<typeof getRenderConfig
       title: it.track.title,
       artist: it.track.artist,
       durationSec: it.track.durationSec,
+      trackKind: it.track.kind,
       audioUrl: `/api/tracks/${it.trackId}/audio`,
       clipMode: it.clipMode,
       clipStartSec: it.clipStartSec,
@@ -36,7 +37,17 @@ function serialize(config: NonNullable<Awaited<ReturnType<typeof getRenderConfig
       customLabel: it.customLabel,
       artId: it.artId,
       artUrl: it.artId ? `/api/arts/${it.artId}` : null,
+      art: it.art
+        ? {
+            kind: it.art.kind,
+            durationSec: it.art.durationSec,
+            hasAudio: it.art.hasAudio,
+            posterUrl: it.art.posterPath ? `/api/arts/${it.art.id}?poster=1` : null,
+          }
+        : null,
       artCrop: cropFromColumns(it.artCropX, it.artCropY, it.artCropW, it.artCropH),
+      audioSource: it.audioSource,
+      mediaStartSec: it.mediaStartSec,
     })),
   };
 }

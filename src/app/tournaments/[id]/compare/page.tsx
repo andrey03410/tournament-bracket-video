@@ -7,6 +7,7 @@ interface TrackDto {
   id: string;
   title: string;
   artist: string | null;
+  kind: "audio" | "video";
   audioUrl: string;
 }
 interface Standing {
@@ -111,6 +112,31 @@ export default function ComparePage({ params }: { params: { id: string } }) {
       "🎧"
     );
 
+  // Starting one player pauses the other — a video+audio cacophony helps nobody.
+  const pauseOthers = (e: React.SyntheticEvent<HTMLMediaElement>) => {
+    const self = e.currentTarget;
+    document
+      .querySelectorAll<HTMLMediaElement>(".versus audio, .versus video")
+      .forEach((m) => {
+        if (m !== self) m.pause();
+      });
+  };
+
+  // Blind mode hides the footage too (it gives the track away): play the file
+  // through an <audio> element until names are revealed.
+  const player = (t: TrackDto) =>
+    t.kind === "video" && showNames ? (
+      <video
+        controls
+        preload="metadata"
+        src={t.audioUrl}
+        onPlay={pauseOthers}
+        style={{ width: "100%", maxHeight: 240, background: "#000", borderRadius: 8 }}
+      />
+    ) : (
+      <audio controls preload="none" src={t.audioUrl} onPlay={pauseOthers} />
+    );
+
   return (
     <div className="container">
       <div className="row" style={{ justifyContent: "space-between" }}>
@@ -125,7 +151,7 @@ export default function ComparePage({ params }: { params: { id: string } }) {
       <div className="versus">
         <div className="choice">
           <div className="name">{name(a)}</div>
-          <audio controls preload="none" src={a.audioUrl} />
+          {player(a)}
           <button className="btn" style={{ marginTop: 16 }} onClick={() => submit("a")} disabled={busy}>
             ← Это лучше
           </button>
@@ -133,7 +159,7 @@ export default function ComparePage({ params }: { params: { id: string } }) {
         <div className="vs">VS</div>
         <div className="choice">
           <div className="name">{name(b)}</div>
-          <audio controls preload="none" src={b.audioUrl} />
+          {player(b)}
           <button className="btn" style={{ marginTop: 16 }} onClick={() => submit("b")} disabled={busy}>
             Это лучше →
           </button>

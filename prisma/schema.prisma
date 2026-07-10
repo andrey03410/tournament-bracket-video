@@ -55,6 +55,7 @@ model Track {
   filePath     String
   durationSec  Float?
   order        Int
+  kind         String  @default("audio") // "audio" | "video"
 
   renderItems RenderItem[]
 }
@@ -82,12 +83,19 @@ model Ranking {
 
 // ---- Phase 2: render ----
 
+// Pool media: images and videos. Kept named "Art" for compatibility; kind
+// distinguishes the two.
 model Art {
   id       String  @id @default(cuid())
   userId   String
   user     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   filePath String
   label    String?
+  kind     String  @default("image") // "image" | "video"
+  // Video-only metadata (probed at upload).
+  durationSec Float?
+  hasAudio    Boolean @default(false)
+  posterPath  String? // extracted first frame (jpg) for grid cards / thumbs
   createdAt DateTime @default(now())
   // Set when the art is assigned to a render item; drives the "recent" picker block.
   lastUsedAt DateTime?
@@ -134,6 +142,12 @@ model RenderItem {
   artCropY Float?
   artCropW Float?
   artCropH Float?
+  // Audio source: "track" (default) or "media" (the attached pool video's own audio;
+  // valid only when the attached media is a video with an audio stream).
+  audioSource String @default("track")
+  // When the attached video is visual-only (audioSource = "track"): footage start
+  // offset in seconds. null = 0.
+  mediaStartSec Float?
 
   @@unique([renderConfigId, trackId])
 }

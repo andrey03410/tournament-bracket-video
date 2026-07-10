@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { userOr401, notFound } from "@/lib/api";
+import { userOr401, notFound, mediaResponse } from "@/lib/api";
 import { prisma } from "@/lib/db";
 import { absPath } from "@/lib/storage";
 
@@ -12,6 +12,10 @@ const MIME: Record<string, string> = {
   ".wav": "audio/wav",
   ".ogg": "audio/ogg",
   ".opus": "audio/ogg",
+  // video tracks are served from the same route (players pick the track by kind)
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mov": "video/quicktime",
 };
 
 export async function GET(req: Request, { params }: { params: { id: string } }) {
@@ -25,43 +29,5 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
   const data = await readFile(absPath(track.filePath));
   const ext = path.extname(track.filePath).toLowerCase();
-  const contentType = MIME[ext] ?? "application/octet-stream";
-  const total = data.length;
-
-  // Honor HTTP Range requests so the <audio> element can seek before the whole
-  // file has buffered (otherwise seeking only works on a re-listen, from cache).
-  const range = req.headers.get("range");
-  if (range) {
-    const match = /bytes=(\d*)-(\d*)/.exec(range);
-    if (match) {
-      const start = match[1] ? parseInt(match[1], 10) : 0;
-      const end = match[2] ? parseInt(match[2], 10) : total - 1;
-      if (start >= total || end >= total || start > end) {
-        return new Response(null, {
-          status: 416,
-          headers: { "Content-Range": `bytes */${total}`, "Accept-Ranges": "bytes" },
-        });
-      }
-      const chunk = data.subarray(start, end + 1);
-      return new Response(new Uint8Array(chunk), {
-        status: 206,
-        headers: {
-          "Content-Type": contentType,
-          "Content-Range": `bytes ${start}-${end}/${total}`,
-          "Accept-Ranges": "bytes",
-          "Content-Length": String(chunk.length),
-          "Cache-Control": "private, max-age=3600",
-        },
-      });
-    }
-  }
-
-  return new Response(new Uint8Array(data), {
-    headers: {
-      "Content-Type": contentType,
-      "Content-Length": String(total),
-      "Accept-Ranges": "bytes",
-      "Cache-Control": "private, max-age=3600",
-    },
-  });
+  return mediaResponse(req, data, MIME[ext] ?? "application/octet-stream");
 }

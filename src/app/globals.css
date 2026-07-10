@@ -363,3 +363,39 @@ audio {
   border: 1px solid var(--border);
   flex-shrink: 0;
 }
+
+.art-badge {
+  position: absolute;
+  left: 6px;
+  bottom: 34px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(10, 12, 18, 0.8);
+  color: #fff;
+  font-size: 11px;
+  pointer-events: none;
+}
+
+.kind-tabs {
+  display: flex;
+  gap: 4px;
+}
+.kind-tabs .btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.hint-details {
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.hint-details summary {
+  cursor: pointer;
+  color: var(--accent);
+}
+.hint-details ul {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  line-height: 1.55;
+}

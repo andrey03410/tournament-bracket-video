@@ -21,6 +21,7 @@ export async function GET(
       id: tr.id,
       title: tr.title,
       artist: tr.artist,
+      kind: tr.kind,
       audioUrl: `/api/tracks/${tr.id}/audio`,
     };
   };

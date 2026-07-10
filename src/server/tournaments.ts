@@ -38,11 +38,12 @@ export async function createTournament(
         title: t.title,
         artist: t.artist,
         durationSec: t.durationSec,
+        kind: t.kind,
         filePath: "",
         order: order++,
       },
     });
-    const ext = path.extname(t.filename) || ".mp3";
+    const ext = path.extname(t.filename) || (t.kind === "video" ? ".mp4" : ".mp3");
     const rel = await saveFile(trackPath(tournament.id, created.id, ext), t.data);
     await prisma.track.update({ where: { id: created.id }, data: { filePath: rel } });
   }

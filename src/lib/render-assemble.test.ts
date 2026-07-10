@@ -18,7 +18,7 @@ function item(overrides: Partial<AssembleItem> = {}): AssembleItem {
     clipEndSec: null,
     snippetLenSec: null,
     durationSec: null,
-    artRef: null,
+    visual: null,
     audioRef: "t1.mp3",
     ...overrides,
   };
@@ -82,17 +82,102 @@ describe("assemblePlanItems", () => {
   });
 });
 
-describe("artCrop passthrough", () => {
-  it("carries the crop into the plan item", () => {
+describe("audio-source clamping", () => {
+  it("clamps the segment to what the audio source can fill", () => {
+    // 30s snippet requested, but the source is 20s and starts at 5s -> 15s
     const [p] = assemblePlanItems(
-      [item({ artCrop: { x: 0, y: 0.1, w: 1, h: 0.8 } })],
+      [item({ snippetLenSec: 30, resolvedStartSec: 5, durationSec: 20 })],
       { defaultClipSec: 30 },
     );
-    expect(p.artCrop).toEqual({ x: 0, y: 0.1, w: 1, h: 0.8 });
+    expect(p.clipSec).toBe(15);
   });
 
-  it("defaults to null when the item has no crop", () => {
+  it("clamps a manual range that runs past the source end", () => {
+    const [p] = assemblePlanItems(
+      [item({ clipMode: "manual", clipStartSec: 10, clipEndSec: 40, durationSec: 20 })],
+      { defaultClipSec: 30 },
+    );
+    expect(p.clipSec).toBe(10);
+  });
+
+  it("leaves clips alone when the duration is unknown or sufficient", () => {
+    const [long] = assemblePlanItems(
+      [item({ snippetLenSec: 30, durationSec: 200 })],
+      { defaultClipSec: 30 },
+    );
+    expect(long.clipSec).toBe(30);
+    const [unknown] = assemblePlanItems([item({ snippetLenSec: 30 })], {
+      defaultClipSec: 30,
+    });
+    expect(unknown.clipSec).toBe(30);
+  });
+});
+
+describe("visual resolution", () => {
+  it("no visual -> #N placeholder", () => {
     const [p] = assemblePlanItems([item()], { defaultClipSec: 30 });
-    expect(p.artCrop).toBeNull();
+    expect(p.visual).toEqual({ kind: "none", path: null, crop: null, startSec: 0, loopSec: null });
+  });
+
+  it("image visual carries the ref and crop", () => {
+    const crop = { x: 0, y: 0.1, w: 1, h: 0.8 };
+    const [p] = assemblePlanItems(
+      [item({ visual: { kind: "image", ref: "a1.png", crop } })],
+      { defaultClipSec: 30 },
+    );
+    expect(p.visual).toEqual({ kind: "image", path: "a1.png", crop, startSec: 0, loopSec: null });
+  });
+
+  it("audio-synced video plays the exact audio fragment without looping", () => {
+    const [p] = assemblePlanItems(
+      [
+        item({
+          resolvedStartSec: 42,
+          snippetLenSec: 30,
+          durationSec: 200,
+          visual: { kind: "video", ref: "v1.mp4", crop: null, syncedToAudio: true },
+        }),
+      ],
+      { defaultClipSec: 30 },
+    );
+    expect(p.visual).toEqual({ kind: "video", path: "v1.mp4", crop: null, startSec: 42, loopSec: null });
+  });
+
+  it("visual-only video shorter than the segment loops over the available footage", () => {
+    const [p] = assemblePlanItems(
+      [
+        item({
+          snippetLenSec: 30,
+          visual: {
+            kind: "video",
+            ref: "op.mp4",
+            crop: null,
+            startSec: 5,
+            footageDurationSec: 20,
+          },
+        }),
+      ],
+      { defaultClipSec: 30 },
+    );
+    expect(p.visual).toEqual({ kind: "video", path: "op.mp4", crop: null, startSec: 5, loopSec: 15 });
+  });
+
+  it("visual-only video long enough plays straight from its offset", () => {
+    const [p] = assemblePlanItems(
+      [
+        item({
+          snippetLenSec: 30,
+          visual: {
+            kind: "video",
+            ref: "op.mp4",
+            crop: null,
+            startSec: 10,
+            footageDurationSec: 120,
+          },
+        }),
+      ],
+      { defaultClipSec: 30 },
+    );
+    expect(p.visual).toEqual({ kind: "video", path: "op.mp4", crop: null, startSec: 10, loopSec: null });
   });
 });

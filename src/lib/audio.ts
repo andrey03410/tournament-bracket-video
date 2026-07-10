@@ -1,8 +1,9 @@
-// Server-only audio service. Uses the bundled ffmpeg binary (ffmpeg-static) so no
-// system ffmpeg is required. Decodes PCM for RMS analysis and cuts fragments with
-// fades for the render.
+// Server-only media service. Uses the bundled ffmpeg binary (ffmpeg-static) so no
+// system ffmpeg is required. Decodes PCM for RMS analysis, probes stream layout,
+// extracts video posters and cuts audio/video fragments for the render.
 import "server-only";
 import { spawn } from "node:child_process";
+import { stat } from "node:fs/promises";
 import ffmpegPath from "ffmpeg-static";
 import { selectActiveSnippet, type Snippet } from "./domain/rms";
 
@@ -45,6 +46,49 @@ export function probeDurationSec(inputPath: string): Promise<number | null> {
       resolve(Number(h) * 3600 + Number(min) * 60 + Number(s));
     });
   });
+}
+
+export interface MediaInfo {
+  durationSec: number | null;
+  hasAudio: boolean;
+  hasVideo: boolean;
+}
+
+/**
+ * Probe a media file's stream layout via ffmpeg stderr. Cover art embedded in
+ * audio files shows up as an "attached pic" video stream and is not counted.
+ */
+export function probeMediaInfo(inputPath: string): Promise<MediaInfo> {
+  return new Promise((resolve) => {
+    const proc = spawn(FFMPEG, ["-i", inputPath], { stdio: ["ignore", "ignore", "pipe"] });
+    const err: Buffer[] = [];
+    proc.stderr.on("data", (d) => err.push(d));
+    proc.on("error", () => resolve({ durationSec: null, hasAudio: false, hasVideo: false }));
+    proc.on("close", () => {
+      const text = Buffer.concat(err).toString();
+      const m = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(text);
+      const durationSec = m ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) : null;
+      const streams = text.split("\n").filter((l) => /Stream #\d+/.test(l));
+      resolve({
+        durationSec,
+        hasAudio: streams.some((l) => /:\s*Audio:/.test(l)),
+        hasVideo: streams.some((l) => /:\s*Video:/.test(l) && !l.includes("attached pic")),
+      });
+    });
+  });
+}
+
+/** Extract a poster frame (jpg). Seeks ~0.5s in; falls back to the first frame. */
+export async function extractPoster(inputPath: string, outputPath: string): Promise<void> {
+  const wrote = async () =>
+    ((await stat(outputPath).catch(() => null))?.size ?? 0) > 0;
+  try {
+    await run(["-y", "-ss", "0.5", "-i", inputPath, "-frames:v", "1", "-q:v", "3", outputPath]);
+    if (await wrote()) return;
+  } catch {
+    // very short video: 0.5s seek lands past the end -> retry from frame 0
+  }
+  await run(["-y", "-i", inputPath, "-frames:v", "1", "-q:v", "3", outputPath]);
 }
 
 /** Decode a file to mono float32 PCM at ANALYSIS_RATE for RMS analysis. */
@@ -100,6 +144,54 @@ export async function clipAudio(
     `afade=t=in:st=0:d=${fadeSec},afade=t=out:st=${outFadeStart}:d=${fadeSec}`,
     "-ac",
     "2",
+    outputPath,
+  ]);
+}
+
+/** Write `durationSec` of silence — the audio fallback for soundless video tracks. */
+export async function writeSilence(durationSec: number, outputPath: string): Promise<void> {
+  await run([
+    "-y",
+    "-f",
+    "lavfi",
+    "-i",
+    "anullsrc=r=44100:cl=stereo",
+    "-t",
+    String(durationSec),
+    outputPath,
+  ]);
+}
+
+/**
+ * Cut [startSec, startSec+durationSec] of a video's footage to an H.264 mp4
+ * (no audio — the composition always plays audio from its own <Audio> element).
+ * Re-encodes for frame-accurate seeking and predictable playback in Chrome.
+ */
+export async function clipVideo(
+  inputPath: string,
+  startSec: number,
+  durationSec: number,
+  outputPath: string,
+): Promise<void> {
+  await run([
+    "-y",
+    "-ss",
+    String(startSec),
+    "-t",
+    String(durationSec),
+    "-i",
+    inputPath,
+    "-an",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "20",
+    "-pix_fmt",
+    "yuv420p",
+    "-movflags",
+    "+faststart",
     outputPath,
   ]);
 }

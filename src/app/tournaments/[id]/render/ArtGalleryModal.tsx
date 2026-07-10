@@ -4,10 +4,16 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import Cropper, { type Area } from "react-easy-crop";
 import type { ArtCrop } from "@/lib/domain/art-crop";
 
+export type GalleryKind = "image" | "video";
+
 export interface GalleryArt {
   id: string;
   url: string;
   label: string | null;
+  kind: GalleryKind;
+  posterUrl: string | null;
+  durationSec: number | null;
+  hasAudio: boolean;
   usageCount: number;
 }
 
@@ -18,6 +24,12 @@ export interface PickResult {
 
 const PAGE_SIZE = 40;
 
+function fmtDuration(sec: number | null): string {
+  if (sec == null) return "";
+  const s = Math.round(sec);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
 async function fetchArts(params: Record<string, string>) {
   const qs = new URLSearchParams(params).toString();
   const res = await fetch(`/api/arts?${qs}`, { cache: "no-store" });
@@ -25,14 +37,16 @@ async function fetchArts(params: Record<string, string>) {
   return (await res.json()) as { arts: GalleryArt[]; nextCursor: string | null };
 }
 
-/** 16:9 crop editor over one art. Reports a normalized rect (fractions 0..1). */
+/** 16:9 crop editor over one media (image or video). Reports a normalized rect (0..1). */
 function CropStep({
   artUrl,
+  mediaKind,
   initialCrop,
   onApply,
   onBack,
 }: {
   artUrl: string;
+  mediaKind: GalleryKind;
   initialCrop: ArtCrop | null;
   onApply: (crop: ArtCrop | null) => void;
   onBack: (() => void) | null;
@@ -45,7 +59,7 @@ function CropStep({
     <>
       <div className="cropper-box">
         <Cropper
-          image={artUrl}
+          {...(mediaKind === "video" ? { video: artUrl } : { image: artUrl })}
           crop={crop}
           zoom={zoom}
           maxZoom={8}
@@ -117,8 +131,8 @@ export function ArtGalleryModal({
   onPoolChange,
 }: {
   mode: "manage" | "pick" | "crop";
-  /** For mode="crop": the art being re-cropped and its current crop. */
-  cropTarget?: { artId: string; artUrl: string; crop: ArtCrop | null };
+  /** For mode="crop": the media being re-cropped and its current crop. */
+  cropTarget?: { artUrl: string; kind: GalleryKind; crop: ArtCrop | null };
   onPick?: (res: PickResult) => void;
   onClose: () => void;
   /** Called after uploads/deletes so the parent can refresh its own art usages. */
@@ -128,17 +142,29 @@ export function ArtGalleryModal({
   const [recent, setRecent] = useState<GalleryArt[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [kindFilter, setKindFilter] = useState<"" | GalleryKind>("");
   const [busy, setBusy] = useState(false);
   const [drag, setDrag] = useState(false);
-  const [cropArt, setCropArt] = useState<{ artId: string; artUrl: string; crop: ArtCrop | null } | null>(
-    mode === "crop" && cropTarget ? cropTarget : null,
+  const [cropArt, setCropArt] = useState<{
+    artId: string | null;
+    artUrl: string;
+    kind: GalleryKind;
+    crop: ArtCrop | null;
+  } | null>(
+    mode === "crop" && cropTarget
+      ? { artId: null, artUrl: cropTarget.artUrl, kind: cropTarget.kind, crop: cropTarget.crop }
+      : null,
   );
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const loadingRef = useRef(false);
 
-  const loadFirstPage = useCallback(async (q: string) => {
-    const data = await fetchArts({ limit: String(PAGE_SIZE), ...(q ? { q } : {}) });
+  const loadFirstPage = useCallback(async (q: string, kind: "" | GalleryKind) => {
+    const data = await fetchArts({
+      limit: String(PAGE_SIZE),
+      ...(q ? { q } : {}),
+      ...(kind ? { kind } : {}),
+    });
     setArts(data.arts);
     setNextCursor(data.nextCursor);
   }, []);
@@ -146,18 +172,18 @@ export function ArtGalleryModal({
   // Initial load + recent block (picker only).
   useEffect(() => {
     if (mode === "crop") return;
-    void loadFirstPage("");
+    void loadFirstPage("", "");
     if (mode === "pick") {
       void fetchArts({ recent: "1" }).then((d) => setRecent(d.arts));
     }
   }, [mode, loadFirstPage]);
 
-  // Debounced search.
+  // Debounced search (also re-runs on the kind filter change).
   useEffect(() => {
     if (mode === "crop") return;
-    const t = setTimeout(() => void loadFirstPage(query), 300);
+    const t = setTimeout(() => void loadFirstPage(query, kindFilter), 300);
     return () => clearTimeout(t);
-  }, [query, mode, loadFirstPage]);
+  }, [query, kindFilter, mode, loadFirstPage]);
 
   const loadMore = useCallback(async () => {
     if (!nextCursor || loadingRef.current) return;
@@ -167,13 +193,14 @@ export function ArtGalleryModal({
         limit: String(PAGE_SIZE),
         cursor: nextCursor,
         ...(query ? { q: query } : {}),
+        ...(kindFilter ? { kind: kindFilter } : {}),
       });
       setArts((prev) => [...prev, ...data.arts]);
       setNextCursor(data.nextCursor);
     } finally {
       loadingRef.current = false;
     }
-  }, [nextCursor, query]);
+  }, [nextCursor, query, kindFilter]);
 
   // Infinite scroll.
   useEffect(() => {
@@ -187,18 +214,23 @@ export function ArtGalleryModal({
   }, [loadMore, cropArt]);
 
   async function uploadFiles(files: FileList | File[]) {
-    const images = Array.from(files).filter((f) => f.type.startsWith("image/"));
-    if (!images.length) return;
+    const media = Array.from(files).filter(
+      (f) =>
+        f.type.startsWith("image/") ||
+        f.type.startsWith("video/") ||
+        /\.(mp4|webm|mov)$/i.test(f.name), // .mov often arrives with an empty MIME type
+    );
+    if (!media.length) return;
     setBusy(true);
     try {
       await Promise.all(
-        images.map((f) => {
+        media.map((f) => {
           const fd = new FormData();
           fd.append("file", f);
           return fetch("/api/arts", { method: "POST", body: fd });
         }),
       );
-      await loadFirstPage(query);
+      await loadFirstPage(query, kindFilter);
       onPoolChange?.();
     } finally {
       setBusy(false);
@@ -229,8 +261,8 @@ export function ArtGalleryModal({
     cropArt != null
       ? "Обрезка (рамка 16:9)"
       : mode === "manage"
-        ? "Менеджер артов"
-        : "Выбор арта";
+        ? "Менеджер медиа"
+        : "Выбор медиа";
 
   function card(a: GalleryArt, selectable: boolean) {
     return (
@@ -239,12 +271,27 @@ export function ArtGalleryModal({
         className={`art-card${selectable ? " selectable" : ""}`}
         onClick={
           selectable
-            ? () => setCropArt({ artId: a.id, artUrl: a.url, crop: null })
+            ? () => setCropArt({ artId: a.id, artUrl: a.url, kind: a.kind, crop: null })
             : undefined
         }
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img className="thumb" src={a.url} alt={a.label ?? "art"} loading="lazy" />
+        {a.kind === "video" && !a.posterUrl ? (
+          <video className="thumb" src={a.url} muted preload="metadata" />
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            className="thumb"
+            src={a.kind === "video" ? a.posterUrl! : a.url}
+            alt={a.label ?? "art"}
+            loading="lazy"
+          />
+        )}
+        {a.kind === "video" ? (
+          <span className="art-badge">
+            🎬 {fmtDuration(a.durationSec)}
+            {a.hasAudio ? "" : " · без звука"}
+          </span>
+        ) : null}
         {mode === "manage" ? (
           <>
             <div className="meta">
@@ -282,12 +329,21 @@ export function ArtGalleryModal({
         </div>
         <div className="modal-body">
           {cropArt ? (
-            <CropStep
-              artUrl={cropArt.artUrl}
-              initialCrop={cropArt.crop}
-              onApply={(crop) => onPick?.({ artId: cropArt.artId, crop })}
-              onBack={mode === "crop" ? null : () => setCropArt(null)}
-            />
+            <>
+              <CropStep
+                artUrl={cropArt.artUrl}
+                mediaKind={cropArt.kind}
+                initialCrop={cropArt.crop}
+                onApply={(crop) => onPick?.({ artId: cropArt.artId ?? "", crop })}
+                onBack={mode === "crop" ? null : () => setCropArt(null)}
+              />
+              {cropArt.kind === "video" ? (
+                <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>
+                  Рамка применяется ко всему видеоряду. Видео короче фрагмента
+                  будет зациклено.
+                </p>
+              ) : null}
+            </>
           ) : (
             <>
               <div
@@ -304,11 +360,13 @@ export function ArtGalleryModal({
                   void uploadFiles(e.dataTransfer.files);
                 }}
               >
-                {busy ? "Загрузка…" : "Перетащите изображения сюда или нажмите, чтобы выбрать"}
+                {busy
+                  ? "Загрузка…"
+                  : "Перетащите картинки или видео сюда или нажмите, чтобы выбрать"}
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/*,video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov"
                   multiple
                   hidden
                   onChange={(e) => {
@@ -318,14 +376,33 @@ export function ArtGalleryModal({
                 />
               </div>
 
-              <input
-                placeholder="🔍 Поиск по названию…"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                style={{ marginBottom: 12 }}
-              />
+              <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+                <input
+                  placeholder="🔍 Поиск по названию…"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  style={{ flex: 1, marginBottom: 0 }}
+                />
+                <div className="kind-tabs">
+                  {(
+                    [
+                      ["", "Все"],
+                      ["image", "Картинки"],
+                      ["video", "Видео"],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      key={value}
+                      className={`btn ghost${kindFilter === value ? " active" : ""}`}
+                      onClick={() => setKindFilter(value)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-              {mode === "pick" && recent.length > 0 && !query ? (
+              {mode === "pick" && recent.length > 0 && !query && !kindFilter ? (
                 <>
                   <p className="muted" style={{ fontSize: 13, margin: "0 0 8px" }}>Недавние</p>
                   <div className="art-grid" style={{ marginBottom: 14 }}>
@@ -337,7 +414,9 @@ export function ArtGalleryModal({
 
               {arts.length === 0 ? (
                 <p className="muted" style={{ fontSize: 14 }}>
-                  {query ? "Ничего не найдено." : "Пул пуст — загрузите первые картинки."}
+                  {query || kindFilter
+                    ? "Ничего не найдено."
+                    : "Пул пуст — загрузите первые картинки или видео."}
                 </p>
               ) : (
                 <div className="art-grid">{arts.map((a) => card(a, mode === "pick"))}</div>

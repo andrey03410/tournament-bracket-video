@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { userOr401, badRequest, notFound } from "@/lib/api";
+import { userOr401, badRequest, notFound, mediaResponse } from "@/lib/api";
 import { prisma } from "@/lib/db";
 import { absPath } from "@/lib/storage";
 import { renameArt, deleteArt } from "@/server/arts";
@@ -13,9 +13,13 @@ const MIME: Record<string, string> = {
   ".png": "image/png",
   ".webp": "image/webp",
   ".gif": "image/gif",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mov": "video/quicktime",
 };
 
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+/** Serves the media file; `?poster=1` serves a video's extracted poster frame. */
+export async function GET(req: Request, { params }: { params: { id: string } }) {
   const auth = await userOr401();
   if ("response" in auth) return auth.response;
 
@@ -24,14 +28,16 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   });
   if (!art) return notFound();
 
+  const wantPoster = new URL(req.url).searchParams.get("poster") === "1";
+  if (wantPoster) {
+    if (!art.posterPath) return notFound();
+    const poster = await readFile(absPath(art.posterPath));
+    return mediaResponse(req, poster, "image/jpeg");
+  }
+
   const data = await readFile(absPath(art.filePath));
   const ext = path.extname(art.filePath).toLowerCase();
-  return new Response(new Uint8Array(data), {
-    headers: {
-      "Content-Type": MIME[ext] ?? "application/octet-stream",
-      "Cache-Control": "private, max-age=3600",
-    },
-  });
+  return mediaResponse(req, data, MIME[ext] ?? "application/octet-stream");
 }
 
 const patchSchema = z.object({ label: z.string().max(200).nullable() });

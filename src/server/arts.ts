@@ -1,13 +1,17 @@
 import "server-only";
 import path from "node:path";
 import { prisma } from "@/lib/db";
-import { saveFile, removePath, artPath } from "@/lib/storage";
+import { saveFile, removePath, artPath, absPath } from "@/lib/storage";
+import { probeMediaInfo, extractPoster } from "@/lib/audio";
+import { VIDEO_EXT } from "@/lib/upload";
+import type { MediaKind } from "@/lib/domain/position-media";
 
-// Service layer for the user's art pool: listing/search/pagination, upload,
-// rename, delete. Kept framework-free (thin routes on top) so the full behavior
-// is covered by integration tests against the real schema.
+// Service layer for the user's media pool (images + videos): listing/search/
+// pagination, upload, rename, delete. Kept framework-free (thin routes on top)
+// so the full behavior is covered by integration tests against the real schema.
 
 export const IMG_EXT = [".jpg", ".jpeg", ".png", ".webp", ".gif"];
+export { VIDEO_EXT };
 
 const DEFAULT_LIMIT = 40;
 const MAX_LIMIT = 100;
@@ -17,6 +21,10 @@ export interface ArtRow {
   id: string;
   label: string | null;
   filePath: string;
+  kind: MediaKind;
+  durationSec: number | null;
+  hasAudio: boolean;
+  posterPath: string | null;
   usageCount: number;
   lastUsedAt: Date | null;
   createdAt: Date;
@@ -33,6 +41,10 @@ function toRow(a: ArtWithCount): ArtRow {
     id: a.id,
     label: a.label,
     filePath: a.filePath,
+    kind: a.kind as MediaKind,
+    durationSec: a.durationSec,
+    hasAudio: a.hasAudio,
+    posterPath: a.posterPath,
     usageCount: a._count.renderItems,
     lastUsedAt: a.lastUsedAt,
     createdAt: a.createdAt,
@@ -41,11 +53,12 @@ function toRow(a: ArtWithCount): ArtRow {
 
 export interface ListArtsOptions {
   q?: string;
+  kind?: MediaKind;
   cursor?: string;
   limit?: number;
 }
 
-/** Newest-first listing with optional label search and cursor pagination. */
+/** Newest-first listing with optional label search, kind filter and cursor pagination. */
 export async function listArts(
   userId: string,
   opts: ListArtsOptions = {},
@@ -57,6 +70,7 @@ export async function listArts(
     where: {
       userId,
       ...(q ? { label: { contains: q } } : {}),
+      ...(opts.kind ? { kind: opts.kind } : {}),
     },
     include: ART_INCLUDE,
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -71,7 +85,7 @@ export async function listArts(
   };
 }
 
-/** Arts recently assigned to render items, most recent first. */
+/** Media recently assigned to render items, most recent first. */
 export async function listRecentArts(
   userId: string,
   limit = RECENT_LIMIT,
@@ -91,19 +105,48 @@ export interface CreateArtInput {
   label?: string | null;
 }
 
-/** Store an uploaded image; the label defaults to the file name sans extension. */
+/**
+ * Store an uploaded image or video; the label defaults to the file name sans
+ * extension. Videos get their duration/audio-stream flag probed via ffmpeg and
+ * a poster frame extracted (best-effort — a video without one still works).
+ */
 export async function createArt(userId: string, input: CreateArtInput) {
   const ext = (path.extname(input.fileName) || ".jpg").toLowerCase();
-  if (!IMG_EXT.includes(ext)) throw new Error("BAD_EXT");
+  const kind: MediaKind | null = IMG_EXT.includes(ext)
+    ? "image"
+    : VIDEO_EXT.includes(ext)
+      ? "video"
+      : null;
+  if (!kind) throw new Error("BAD_EXT");
 
   const label =
     input.label?.trim() ||
     path.basename(input.fileName, path.extname(input.fileName)).trim() ||
     null;
 
-  const art = await prisma.art.create({ data: { userId, filePath: "", label } });
+  const art = await prisma.art.create({ data: { userId, filePath: "", label, kind } });
   const rel = await saveFile(artPath(userId, art.id, ext), input.data);
-  return prisma.art.update({ where: { id: art.id }, data: { filePath: rel } });
+
+  let durationSec: number | null = null;
+  let hasAudio = false;
+  let posterPath: string | null = null;
+  if (kind === "video") {
+    const info = await probeMediaInfo(absPath(rel));
+    durationSec = info.durationSec;
+    hasAudio = info.hasAudio;
+    const posterRel = artPath(userId, `${art.id}.poster`, ".jpg");
+    try {
+      await extractPoster(absPath(rel), absPath(posterRel));
+      posterPath = posterRel;
+    } catch {
+      // no extractable frame -> cards fall back to a generic tile
+    }
+  }
+
+  return prisma.art.update({
+    where: { id: art.id },
+    data: { filePath: rel, durationSec, hasAudio, posterPath },
+  });
 }
 
 async function ownedArt(userId: string, artId: string) {
@@ -121,18 +164,29 @@ export async function renameArt(userId: string, artId: string, label: string | n
 }
 
 /**
- * Delete an art: positions referencing it are freed (artId -> null via the FK)
- * and their per-position crops are cleared in the same transaction; the file is
- * removed from storage afterwards (best-effort).
+ * Delete a pool media: positions referencing it are freed (artId -> null via
+ * the FK) and their per-position settings (crop, audio source, footage offset)
+ * reset to defaults in the same transaction; files are removed afterwards
+ * (best-effort).
  */
 export async function deleteArt(userId: string, artId: string) {
   const art = await ownedArt(userId, artId);
   await prisma.$transaction([
     prisma.renderItem.updateMany({
       where: { artId: art.id },
-      data: { artCropX: null, artCropY: null, artCropW: null, artCropH: null },
+      data: {
+        artCropX: null,
+        artCropY: null,
+        artCropW: null,
+        artCropH: null,
+        audioSource: "track",
+        mediaStartSec: null,
+        // positions that were listening to this media need a fresh RMS pass
+        resolvedStartSec: null,
+      },
     }),
     prisma.art.delete({ where: { id: art.id } }),
   ]);
   await removePath(art.filePath);
+  if (art.posterPath) await removePath(art.posterPath);
 }

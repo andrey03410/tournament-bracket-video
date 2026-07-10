@@ -3,13 +3,15 @@ import {
   AbsoluteFill,
   Audio,
   Img,
+  Loop,
+  OffthreadVideo,
   Sequence,
   interpolate,
   staticFile,
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
-import type { PlanSegment } from "@/lib/domain/video-plan";
+import type { PlanSegment, SegmentVisual } from "@/lib/domain/video-plan";
 import { artCropStyle } from "@/lib/domain/art-crop";
 import type { AssetMode, TopVideoProps } from "./types";
 
@@ -49,6 +51,50 @@ const Card: React.FC<{ title: string; subtitle?: string | null }> = ({
   );
 };
 
+/** The segment's background visual: image, (looping) muted video, or #N placeholder. */
+const VisualView: React.FC<{ visual: SegmentVisual; rank: number; mode: AssetMode }> = ({
+  visual,
+  rank,
+  mode,
+}) => {
+  const { fps } = useVideoConfig();
+  const src = resolve(mode, visual.path);
+
+  if (visual.kind === "video" && src) {
+    // Audio always comes from the segment's own <Audio> element, so footage is muted.
+    const video = (
+      <OffthreadVideo
+        muted
+        src={src}
+        startFrom={Math.round(visual.startSec * fps)}
+        style={artCropStyle(visual.crop)}
+      />
+    );
+    return visual.loopSec != null ? (
+      <Loop durationInFrames={Math.max(1, Math.round(visual.loopSec * fps))}>{video}</Loop>
+    ) : (
+      video
+    );
+  }
+  if (visual.kind === "image" && src) {
+    return <Img src={src} style={artCropStyle(visual.crop)} />;
+  }
+  return (
+    <AbsoluteFill
+      style={{
+        background: `linear-gradient(135deg, #1a2030, ${ACCENT})`,
+        justifyContent: "center",
+        alignItems: "center",
+        color: "rgba(255,255,255,0.85)",
+        fontSize: 360,
+        fontWeight: 800,
+      }}
+    >
+      #{rank}
+    </AbsoluteFill>
+  );
+};
+
 const SegmentView: React.FC<{ seg: PlanSegment; mode: AssetMode }> = ({ seg, mode }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -74,7 +120,6 @@ const SegmentView: React.FC<{ seg: PlanSegment; mode: AssetMode }> = ({ seg, mod
           { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
         );
 
-  const art = resolve(mode, seg.artPath);
   const audio = resolve(mode, seg.audioPath);
   const startFrom = Math.round(seg.clipStartSec * fps);
 
@@ -84,25 +129,10 @@ const SegmentView: React.FC<{ seg: PlanSegment; mode: AssetMode }> = ({ seg, mod
         <Audio src={audio} startFrom={startFrom} endAt={startFrom + seg.durationFrames} />
       ) : null}
 
-      {/* Art fills the whole frame as a background; per-position crop maps the
+      {/* Visual fills the whole frame as a background; per-position crop maps the
           selected rect onto the frame (null -> plain cover) */}
       <AbsoluteFill style={{ opacity: artOpacity, overflow: "hidden" }}>
-        {art ? (
-          <Img src={art} style={artCropStyle(seg.artCrop)} />
-        ) : (
-          <AbsoluteFill
-            style={{
-              background: `linear-gradient(135deg, #1a2030, ${ACCENT})`,
-              justifyContent: "center",
-              alignItems: "center",
-              color: "rgba(255,255,255,0.85)",
-              fontSize: 360,
-              fontWeight: 800,
-            }}
-          >
-            #{seg.rank}
-          </AbsoluteFill>
-        )}
+        <VisualView visual={seg.visual} rank={seg.rank} mode={mode} />
       </AbsoluteFill>
 
       {/* Dark gradient at the bottom keeps the label readable over any art */}

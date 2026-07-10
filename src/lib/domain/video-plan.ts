@@ -18,12 +18,22 @@ import type { ArtCrop } from "./art-crop";
 
 export type DisplayOrder = "desc" | "asc";
 
+/** What a segment shows: an image, looping/straight video footage, or the #N placeholder. */
+export interface SegmentVisual {
+  kind: "image" | "video" | "none";
+  path: string | null;
+  crop: ArtCrop | null;
+  /** Video: footage start offset (sec). 0 for images/placeholder. */
+  startSec: number;
+  /** Video: footage length (sec) to loop when shorter than the segment; null = play straight. */
+  loopSec: number | null;
+}
+
 export interface PlanItemInput {
   trackId: string;
   rank: number; // 1 = best
   label: string;
-  artPath: string | null;
-  artCrop?: ArtCrop | null;
+  visual: SegmentVisual;
   audioPath: string;
   clipStartSec: number;
   clipSec: number;
@@ -43,8 +53,7 @@ export interface PlanSegment {
   trackId: string;
   rank: number;
   label: string;
-  artPath: string | null;
-  artCrop: ArtCrop | null;
+  visual: SegmentVisual;
   audioPath: string;
   clipStartSec: number;
   clipSec: number;
@@ -103,8 +112,7 @@ export function buildVideoPlan(
       trackId: item.trackId,
       rank: item.rank,
       label: item.label,
-      artPath: item.artPath,
-      artCrop: item.artCrop ?? null,
+      visual: item.visual,
       audioPath: item.audioPath,
       clipStartSec: item.clipStartSec,
       clipSec: item.clipSec,

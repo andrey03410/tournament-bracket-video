@@ -11,9 +11,21 @@ export async function GET() {
   return NextResponse.json({ tournaments });
 }
 
+// Video archives are heavy; past this ceiling the request would die anyway —
+// fail it honestly instead.
+const MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB
+
 export async function POST(req: Request) {
   const auth = await userOr401();
   if ("response" in auth) return auth.response;
+
+  const contentLength = Number(req.headers.get("content-length") ?? 0);
+  if (contentLength > MAX_ARCHIVE_BYTES) {
+    return NextResponse.json(
+      { error: "Архив слишком большой (лимит 2 ГБ)" },
+      { status: 413 },
+    );
+  }
 
   const form = await req.formData();
   const title = String(form.get("title") ?? "").trim();
@@ -23,7 +35,7 @@ export async function POST(req: Request) {
 
   if (!title) return badRequest("Укажите название");
   if (!isScheme(scheme)) return badRequest("Неизвестная схема");
-  if (!(file instanceof File)) return badRequest("Прикрепите ZIP-архив с OST");
+  if (!(file instanceof File)) return badRequest("Прикрепите ZIP-архив с треками");
 
   const buffer = Buffer.from(await file.arrayBuffer());
   let tracks;
@@ -33,7 +45,7 @@ export async function POST(req: Request) {
     return badRequest("Не удалось прочитать архив");
   }
   if (tracks.length < 2) {
-    return badRequest("В архиве должно быть минимум 2 аудиофайла");
+    return badRequest("В архиве должно быть минимум 2 аудио- или видеофайла");
   }
 
   const tournament = await createTournament(
