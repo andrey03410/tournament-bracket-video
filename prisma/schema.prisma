@@ -89,6 +89,8 @@ model Art {
   filePath String
   label    String?
   createdAt DateTime @default(now())
+  // Set when the art is assigned to a render item; drives the "recent" picker block.
+  lastUsedAt DateTime?
 
   renderItems RenderItem[]
 }
@@ -126,6 +128,12 @@ model RenderItem {
   // Cached active-snippet start (sec), computed via RMS analysis. null = needs (re)compute.
   resolvedStartSec Float?
   customLabel    String?
+  // Non-destructive per-position crop: normalized rect (0..1 fractions of the source
+  // image) with a 16:9 aspect in source pixels. All four set, or all null (= auto cover).
+  artCropX Float?
+  artCropY Float?
+  artCropW Float?
+  artCropH Float?
 
   @@unique([renderConfigId, trackId])
 }

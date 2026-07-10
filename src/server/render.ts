@@ -11,6 +11,7 @@ import {
   type ClipMode,
 } from "@/lib/render-assemble";
 import { buildVideoPlan, type DisplayOrder } from "@/lib/domain/video-plan";
+import { cropFromColumns } from "@/lib/domain/art-crop";
 
 /** Create a default render config + items (top-N) for a completed tournament. */
 export async function ensureRenderConfig(userId: string, tournamentId: string) {
@@ -77,6 +78,7 @@ function toAssembleItem(
     durationSec: it.track.durationSec,
     resolvedStartSec: it.resolvedStartSec,
     artRef,
+    artCrop: cropFromColumns(it.artCropX, it.artCropY, it.artCropW, it.artCropH),
     audioRef,
   };
 }
@@ -226,6 +228,7 @@ async function runRender(jobId: string): Promise<void> {
       snippetLenSec: null,
       durationSec: clipSec,
       artRef: artBase,
+      artCrop: cropFromColumns(it.artCropX, it.artCropY, it.artCropW, it.artCropH),
       audioRef: audioBase,
     });
 

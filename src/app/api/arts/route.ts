@@ -1,22 +1,35 @@
 import { NextResponse } from "next/server";
-import path from "node:path";
 import { userOr401, badRequest } from "@/lib/api";
-import { prisma } from "@/lib/db";
-import { saveFile, artPath } from "@/lib/storage";
+import { listArts, listRecentArts, createArt, type ArtRow } from "@/server/arts";
 
-export async function GET() {
-  const auth = await userOr401();
-  if ("response" in auth) return auth.response;
-  const arts = await prisma.art.findMany({
-    where: { userId: auth.userId },
-    orderBy: { createdAt: "desc" },
-  });
-  return NextResponse.json({
-    arts: arts.map((a) => ({ id: a.id, label: a.label, url: `/api/arts/${a.id}` })),
-  });
+function serialize(a: ArtRow) {
+  return {
+    id: a.id,
+    label: a.label,
+    url: `/api/arts/${a.id}`,
+    usageCount: a.usageCount,
+    lastUsedAt: a.lastUsedAt,
+  };
 }
 
-const IMG_EXT = [".jpg", ".jpeg", ".png", ".webp", ".gif"];
+export async function GET(req: Request) {
+  const auth = await userOr401();
+  if ("response" in auth) return auth.response;
+
+  const params = new URL(req.url).searchParams;
+  if (params.get("recent")) {
+    const arts = await listRecentArts(auth.userId);
+    return NextResponse.json({ arts: arts.map(serialize), nextCursor: null });
+  }
+
+  const limitRaw = Number(params.get("limit"));
+  const { arts, nextCursor } = await listArts(auth.userId, {
+    q: params.get("q") ?? undefined,
+    cursor: params.get("cursor") ?? undefined,
+    limit: Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined,
+  });
+  return NextResponse.json({ arts: arts.map(serialize), nextCursor });
+}
 
 export async function POST(req: Request) {
   const auth = await userOr401();
@@ -27,15 +40,16 @@ export async function POST(req: Request) {
   const label = String(form.get("label") ?? "").trim() || null;
   if (!(file instanceof File)) return badRequest("Прикрепите изображение");
 
-  const ext = (path.extname(file.name) || ".jpg").toLowerCase();
-  if (!IMG_EXT.includes(ext)) return badRequest("Неподдерживаемый формат изображения");
-
-  const art = await prisma.art.create({
-    data: { userId: auth.userId, filePath: "", label },
-  });
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const rel = await saveFile(artPath(auth.userId, art.id, ext), buffer);
-  await prisma.art.update({ where: { id: art.id }, data: { filePath: rel } });
-
-  return NextResponse.json({ id: art.id, url: `/api/arts/${art.id}`, label });
+  try {
+    const art = await createArt(auth.userId, {
+      fileName: file.name,
+      data: Buffer.from(await file.arrayBuffer()),
+      label,
+    });
+    return NextResponse.json({ id: art.id, url: `/api/arts/${art.id}`, label: art.label });
+  } catch (e) {
+    if ((e as Error).message === "BAD_EXT")
+      return badRequest("Неподдерживаемый формат изображения");
+    throw e;
+  }
 }

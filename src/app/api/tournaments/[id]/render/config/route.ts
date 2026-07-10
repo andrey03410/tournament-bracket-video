@@ -8,6 +8,7 @@ import {
   buildPreviewPlan,
   resolveActiveSnippets,
 } from "@/server/render";
+import { cropFromColumns } from "@/lib/domain/art-crop";
 
 function serialize(config: NonNullable<Awaited<ReturnType<typeof getRenderConfig>>>) {
   return {
@@ -35,6 +36,7 @@ function serialize(config: NonNullable<Awaited<ReturnType<typeof getRenderConfig
       customLabel: it.customLabel,
       artId: it.artId,
       artUrl: it.artId ? `/api/arts/${it.artId}` : null,
+      artCrop: cropFromColumns(it.artCropX, it.artCropY, it.artCropW, it.artCropH),
     })),
   };
 }

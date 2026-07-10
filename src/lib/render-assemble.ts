@@ -1,4 +1,5 @@
 import { formatLabel, type PlanItemInput } from "./domain/video-plan";
+import type { ArtCrop } from "./domain/art-crop";
 
 // Pure assembly of plan items from render-config rows. Kept framework-free so it
 // can be unit-tested and reused by both the live preview and the server render.
@@ -23,6 +24,8 @@ export interface AssembleItem {
   durationSec: number | null;
   /** Resolved asset references (basename for static render, URL for preview). */
   artRef: string | null;
+  /** Non-destructive per-position crop of the art; null = auto cover. */
+  artCrop?: ArtCrop | null;
   audioRef: string;
   /** For active_snippet, the start resolved by RMS analysis. null -> use 0. */
   resolvedStartSec?: number | null;
@@ -58,6 +61,7 @@ export function assemblePlanItems(
     rank: item.rank,
     label: item.customLabel?.trim() || formatLabel(item.rank, item.title, item.artist),
     artPath: item.artRef,
+    artCrop: item.artCrop ?? null,
     audioPath: item.audioRef,
     clipStartSec: resolveClipStart(item),
     clipSec: Math.max(0.5, resolveClipSec(item, config)),

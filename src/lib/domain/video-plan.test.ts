@@ -108,3 +108,25 @@ describe("buildVideoPlan", () => {
     expect(plan.segments[0].startFrame).toBe(0);
   });
 });
+
+describe("artCrop passthrough", () => {
+  const baseConfig = {
+    order: "asc" as const,
+    introEnabled: false,
+    outroEnabled: false,
+  };
+
+  it("carries the crop into the segment", () => {
+    const withCrop = items(1).map((it) => ({
+      ...it,
+      artCrop: { x: 0.25, y: 0.25, w: 0.5, h: 0.5 },
+    }));
+    const plan = buildVideoPlan(baseConfig, withCrop);
+    expect(plan.segments[0].artCrop).toEqual({ x: 0.25, y: 0.25, w: 0.5, h: 0.5 });
+  });
+
+  it("defaults to null when the item has no crop", () => {
+    const plan = buildVideoPlan(baseConfig, items(1));
+    expect(plan.segments[0].artCrop).toBeNull();
+  });
+});

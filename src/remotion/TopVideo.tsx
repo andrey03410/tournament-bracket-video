@@ -10,6 +10,7 @@ import {
   useVideoConfig,
 } from "remotion";
 import type { PlanSegment } from "@/lib/domain/video-plan";
+import { artCropStyle } from "@/lib/domain/art-crop";
 import type { AssetMode, TopVideoProps } from "./types";
 
 const BG = "#0b0d12";
@@ -83,13 +84,11 @@ const SegmentView: React.FC<{ seg: PlanSegment; mode: AssetMode }> = ({ seg, mod
         <Audio src={audio} startFrom={startFrom} endAt={startFrom + seg.durationFrames} />
       ) : null}
 
-      {/* Art fills the whole frame as a background */}
-      <AbsoluteFill style={{ opacity: artOpacity }}>
+      {/* Art fills the whole frame as a background; per-position crop maps the
+          selected rect onto the frame (null -> plain cover) */}
+      <AbsoluteFill style={{ opacity: artOpacity, overflow: "hidden" }}>
         {art ? (
-          <Img
-            src={art}
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
-          />
+          <Img src={art} style={artCropStyle(seg.artCrop)} />
         ) : (
           <AbsoluteFill
             style={{

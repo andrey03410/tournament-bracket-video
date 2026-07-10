@@ -14,6 +14,8 @@ export const GAP_SEC = 1; // pause with fade between OST
 export const LABEL_DELAY_SEC = 1; // label appears 1s after art
 export const LABEL_HOLD_SEC = 5; // label visible for 5s
 
+import type { ArtCrop } from "./art-crop";
+
 export type DisplayOrder = "desc" | "asc";
 
 export interface PlanItemInput {
@@ -21,6 +23,7 @@ export interface PlanItemInput {
   rank: number; // 1 = best
   label: string;
   artPath: string | null;
+  artCrop?: ArtCrop | null;
   audioPath: string;
   clipStartSec: number;
   clipSec: number;
@@ -41,6 +44,7 @@ export interface PlanSegment {
   rank: number;
   label: string;
   artPath: string | null;
+  artCrop: ArtCrop | null;
   audioPath: string;
   clipStartSec: number;
   clipSec: number;
@@ -100,6 +104,7 @@ export function buildVideoPlan(
       rank: item.rank,
       label: item.label,
       artPath: item.artPath,
+      artCrop: item.artCrop ?? null,
       audioPath: item.audioPath,
       clipStartSec: item.clipStartSec,
       clipSec: item.clipSec,

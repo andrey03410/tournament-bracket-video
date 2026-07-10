@@ -81,3 +81,18 @@ describe("assemblePlanItems", () => {
     expect(p.clipSec).toBeGreaterThanOrEqual(0.5);
   });
 });
+
+describe("artCrop passthrough", () => {
+  it("carries the crop into the plan item", () => {
+    const [p] = assemblePlanItems(
+      [item({ artCrop: { x: 0, y: 0.1, w: 1, h: 0.8 } })],
+      { defaultClipSec: 30 },
+    );
+    expect(p.artCrop).toEqual({ x: 0, y: 0.1, w: 1, h: 0.8 });
+  });
+
+  it("defaults to null when the item has no crop", () => {
+    const [p] = assemblePlanItems([item()], { defaultClipSec: 30 });
+    expect(p.artCrop).toBeNull();
+  });
+});

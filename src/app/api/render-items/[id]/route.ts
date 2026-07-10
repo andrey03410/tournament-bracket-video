@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { userOr401, badRequest, notFound } from "@/lib/api";
-import { prisma } from "@/lib/db";
+import { patchRenderItem, type RenderItemPatch } from "@/server/render-items";
 
 const schema = z.object({
   clipMode: z.enum(["manual", "active_snippet", "full"]).optional(),
@@ -12,33 +12,34 @@ const schema = z.object({
   artId: z.string().nullable().optional(),
 });
 
+const SERVICE_ERRORS: Record<string, string> = {
+  ART_NOT_FOUND: "Арт не найден",
+  INVALID_CROP: "Некорректная рамка обрезки",
+  NO_ART: "Сначала выберите арт для позиции",
+};
+
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   const auth = await userOr401();
   if ("response" in auth) return auth.response;
 
-  const item = await prisma.renderItem.findFirst({
-    where: { id: params.id, renderConfig: { tournament: { userId: auth.userId } } },
-  });
-  if (!item) return notFound();
-
-  const parsed = schema.safeParse(await req.json().catch(() => ({})));
+  const body = await req.json().catch(() => ({}));
+  const parsed = schema.safeParse(body);
   if (!parsed.success) return badRequest("Некорректные данные элемента");
 
-  // If an art is referenced, ensure it belongs to the user.
-  if (parsed.data.artId) {
-    const art = await prisma.art.findFirst({
-      where: { id: parsed.data.artId, userId: auth.userId },
-    });
-    if (!art) return badRequest("Арт не найден");
+  // artCrop is validated in the service (parseArtCrop) so its rules live in one
+  // place; forward it only when the key is present (null = explicit reset).
+  const patch: RenderItemPatch = { ...parsed.data };
+  if (typeof body === "object" && body !== null && "artCrop" in body) {
+    patch.artCrop = (body as Record<string, unknown>).artCrop;
   }
 
-  // Invalidate the cached active-snippet start when the inputs that determine it
-  // change (mode switch or snippet length), so it gets recomputed on next load.
-  const data: Record<string, unknown> = { ...parsed.data };
-  if (parsed.data.clipMode !== undefined || parsed.data.snippetLenSec !== undefined) {
-    data.resolvedStartSec = null;
+  try {
+    const updated = await patchRenderItem(auth.userId, params.id, patch);
+    return NextResponse.json({ ok: true, item: { id: updated.id } });
+  } catch (e) {
+    const msg = (e as Error).message;
+    if (msg === "NOT_FOUND") return notFound();
+    if (msg in SERVICE_ERRORS) return badRequest(SERVICE_ERRORS[msg]);
+    throw e;
   }
-
-  const updated = await prisma.renderItem.update({ where: { id: item.id }, data });
-  return NextResponse.json({ ok: true, item: { id: updated.id } });
 }
