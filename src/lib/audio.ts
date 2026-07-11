@@ -163,6 +163,23 @@ export async function writeSilence(durationSec: number, outputPath: string): Pro
 }
 
 /**
+ * A short countdown "tick" sample (sine burst with a fast decay). Used by the
+ * picker timer; generated once into storage/assets and served from there.
+ */
+export async function writeTick(outputPath: string): Promise<void> {
+  await run([
+    "-y",
+    "-f",
+    "lavfi",
+    "-i",
+    "sine=frequency=1300:duration=0.12",
+    "-af",
+    "afade=t=out:st=0.03:d=0.09,volume=0.8",
+    outputPath,
+  ]);
+}
+
+/**
  * Cut [startSec, startSec+durationSec] of a video's footage to an H.264 mp4
  * (no audio — the composition always plays audio from its own <Audio> element).
  * Re-encodes for frame-accurate seeking and predictable playback in Chrome.

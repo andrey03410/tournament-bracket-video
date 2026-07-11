@@ -3,10 +3,9 @@ import { z } from "zod";
 import { userOr401, badRequest, notFound } from "@/lib/api";
 import { prisma } from "@/lib/db";
 import {
-  ensureRenderConfig,
-  getRenderConfig,
+  getProjectRenderConfig,
   buildPreviewPlan,
-  resolveActiveSnippets,
+  resolveActiveSnippetsFor,
 } from "@/server/render";
 import { serializeConfig } from "@/server/render-config-dto";
 
@@ -14,18 +13,15 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   const auth = await userOr401();
   if ("response" in auth) return auth.response;
 
-  try {
-    await ensureRenderConfig(auth.userId, params.id);
-    // Resolve durations + active-snippet starts so the preview seeks correctly.
-    await resolveActiveSnippets(auth.userId, params.id);
-  } catch (e) {
-    const msg = String((e as Error).message);
-    if (msg === "NOT_FOUND") return notFound();
-    return badRequest(msg);
-  }
-  const config = await getRenderConfig(auth.userId, params.id);
+  let config = await getProjectRenderConfig(auth.userId, params.id);
   if (!config) return notFound();
-  return NextResponse.json({ config: serializeConfig(config), previewPlan: buildPreviewPlan(config) });
+  await resolveActiveSnippetsFor(config);
+  config = await getProjectRenderConfig(auth.userId, params.id);
+  if (!config) return notFound();
+  return NextResponse.json({
+    config: serializeConfig(config),
+    previewPlan: buildPreviewPlan(config),
+  });
 }
 
 const patchSchema = z.object({
@@ -42,13 +38,13 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   const auth = await userOr401();
   if ("response" in auth) return auth.response;
 
-  const config = await getRenderConfig(auth.userId, params.id);
+  const config = await getProjectRenderConfig(auth.userId, params.id);
   if (!config) return notFound();
 
   const parsed = patchSchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return badRequest("Некорректные настройки");
 
   await prisma.renderConfig.update({ where: { id: config.id }, data: parsed.data });
-  const updated = await getRenderConfig(auth.userId, params.id);
+  const updated = await getProjectRenderConfig(auth.userId, params.id);
   return NextResponse.json({ config: updated ? serializeConfig(updated) : null });
 }

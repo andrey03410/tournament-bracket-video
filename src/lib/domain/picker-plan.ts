@@ -50,7 +50,7 @@ export interface PlanRoundInput {
   revealSec: number | null; // null = inherit default
   hideAfterReveal: boolean | null;
   timerSec: number | null;
-  bg: { kind: "image" | "video"; ref: string } | null;
+  bg: { kind: "image" | "video"; ref: string; durationSec: number | null } | null;
   bgMusic: { ref: string; durationSec: number | null } | null;
   tiles: PlanTileInput[];
 }
@@ -82,7 +82,7 @@ export interface PlanRound {
   tickSound: boolean;
   /** Answer-highlight phase start; null when the round has no marked answer. */
   answerAtSec: number | null;
-  bg: { kind: "image" | "video"; ref: string } | null;
+  bg: { kind: "image" | "video"; ref: string; durationSec: number | null } | null;
   bgMusic: {
     ref: string;
     durationSec: number | null;

@@ -48,7 +48,9 @@ const Backdrop: React.FC<{
     <AbsoluteFill style={{ backgroundColor: BG }}>
       {bg && src ? (
         bg.kind === "video" ? (
-          <Loop durationInFrames={Number.MAX_SAFE_INTEGER}>
+          <Loop
+            durationInFrames={Math.max(1, Math.round((bg.durationSec ?? 60) * 30))}
+          >
             <OffthreadVideo muted src={src} style={cover} />
           </Loop>
         ) : (
