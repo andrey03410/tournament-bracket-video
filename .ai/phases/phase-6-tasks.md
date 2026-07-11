@@ -4,24 +4,24 @@
 
 ## Задачи
 
-- [ ] T6.1 Схема: VideoProject/PickerRound/PickerTile; RenderConfig.projectId,
+- [x] T6.1 Схема: VideoProject/PickerRound/PickerTile; RenderConfig.projectId,
       RenderItem.audioArtId (+trackId optional), RenderJob.projectId;
       db push + перезапуск dev.
-- [ ] T6.2 Пул: AUDIO_EXT (аудио в пул), проба, карточки 🎵, фильтр; квота
+- [x] T6.2 Пул: AUDIO_EXT (аудио в пул), проба, карточки 🎵, фильтр; квота
       действует. Юнит+интеграционные тесты.
-- [ ] T6.3 Домен пикера: `picker-layout.ts` (сетки 2–9), `picker-plan.ts`
+- [x] T6.3 Домен пикера: `picker-layout.ts` (сетки 2–9), `picker-plan.ts`
       (тайминги, дакинг, таймер, ответ, labelsMode, наследование). Юнит-тесты.
-- [ ] T6.4 Remotion: композиция PickerVideo (анимация плиток, кольцо-таймер,
+- [x] T6.4 Remotion: композиция PickerVideo (анимация плиток, кольцо-таймер,
       подсветка ответа, фон, подписи); тик-звук ffmpeg + `/api/assets/tick`.
-- [ ] T6.5 Сервисы+API проектов: CRUD проекта/раундов/плиток (валидации,
+- [x] T6.5 Сервисы+API проектов: CRUD проекта/раундов/плиток (валидации,
       изоляция), превью-план, рендер-пайплайн пикера, ручной топ поверх
       RenderConfig/RenderItem (audioArtId), джобы с projectId (кабинет,
       удаление). Интеграционные тесты.
-- [ ] T6.6 UI: «Мои видео» (/projects) с выбором режима; конструктор пикера
+- [x] T6.6 UI: «Мои видео» (/projects) с выбором режима; конструктор пикера
       (дефолты, раунды, плитки, превью, рендер); ручной топ на
       RenderConstructor (добавление позиций из пула, порядок, источник звука);
       навигация в топбаре.
-- [ ] T6.7 Верификация вживую: HTTP E2E, UI-прогон, headless-рендер пикера
+- [x] T6.7 Верификация вживую: HTTP E2E, UI-прогон, headless-рендер пикера
       (кадры: раскладка 3+2, таймер, ответ) + README/CLAUDE.md/verify.
 
 ## Готово, когда

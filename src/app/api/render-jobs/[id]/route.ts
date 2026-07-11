@@ -8,7 +8,10 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   if ("response" in auth) return auth.response;
 
   const job = await prisma.renderJob.findFirst({
-    where: { id: params.id, tournament: { userId: auth.userId } },
+    where: {
+      id: params.id,
+      OR: [{ tournament: { userId: auth.userId } }, { project: { userId: auth.userId } }],
+    },
   });
   if (!job) return notFound();
 
