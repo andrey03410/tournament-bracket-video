@@ -1,6 +1,6 @@
 import AdmZip from "adm-zip";
 
-const AUDIO_EXT = [".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".opus"];
+export const AUDIO_EXT = [".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".opus"];
 // Browser-compatible containers only (no transcode on upload — agreed in spec 04).
 export const VIDEO_EXT = [".mp4", ".webm", ".mov"];
 

@@ -1,4 +1,5 @@
 import type { VideoPlan } from "@/lib/domain/video-plan";
+import type { PickerPlan } from "@/lib/domain/picker-plan";
 
 // How the composition resolves asset paths:
 //  - "static": paths are basenames inside the Remotion public dir (server render)
@@ -22,5 +23,24 @@ export const DEFAULT_PROPS: TopVideoProps = {
     introText: "Top",
     outroText: null,
     segments: [],
+  },
+};
+
+export interface PickerCompositionProps {
+  plan: PickerPlan;
+  assetMode: AssetMode;
+  tickSrc: string | null;
+}
+
+export const DEFAULT_PICKER_PROPS: PickerCompositionProps = {
+  assetMode: "url",
+  tickSrc: null,
+  plan: {
+    fps: 30,
+    width: 1920,
+    height: 1080,
+    durationSec: 3,
+    durationInFrames: 90,
+    rounds: [],
   },
 };

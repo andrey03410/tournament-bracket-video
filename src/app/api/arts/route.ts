@@ -45,7 +45,10 @@ export async function GET(req: Request) {
   const kindRaw = params.get("kind");
   const { arts, nextCursor } = await listArts(auth.userId, {
     q: params.get("q") ?? undefined,
-    kind: kindRaw === "image" || kindRaw === "video" ? kindRaw : undefined,
+    kind:
+      kindRaw === "image" || kindRaw === "video" || kindRaw === "audio"
+        ? kindRaw
+        : undefined,
     cursor: params.get("cursor") ?? undefined,
     limit: Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined,
   });
@@ -86,7 +89,7 @@ export async function POST(req: Request) {
   } catch (e) {
     if ((e as Error).message === "BAD_EXT")
       return badRequest(
-        "Неподдерживаемый формат: картинки jpg/png/webp/gif, видео mp4/webm/mov",
+        "Неподдерживаемый формат: картинки jpg/png/webp/gif, видео mp4/webm/mov, аудио mp3/m4a/flac/wav/ogg",
       );
     if ((e as Error).message === "POOL_QUOTA") return tooLarge(quotaMsg);
     throw e;

@@ -95,9 +95,12 @@ export async function usageSummary(userId: string): Promise<UsageSummary> {
     include: { _count: { select: { renderItems: true } } },
   });
   const jobs = await prisma.renderJob.findMany({
-    where: { tournament: { userId } },
+    where: { OR: [{ tournament: { userId } }, { project: { userId } }] },
     orderBy: { createdAt: "desc" },
-    include: { tournament: { select: { id: true, title: true } } },
+    include: {
+      tournament: { select: { id: true, title: true } },
+      project: { select: { id: true, title: true } },
+    },
   });
 
   const tournamentRows = tournaments.map((t) => ({
@@ -120,8 +123,8 @@ export async function usageSummary(userId: string): Promise<UsageSummary> {
   for (const j of jobs) {
     renderRows.push({
       id: j.id,
-      tournamentId: j.tournament.id,
-      tournamentTitle: j.tournament.title,
+      tournamentId: j.tournament?.id ?? j.project?.id ?? "",
+      tournamentTitle: j.tournament?.title ?? j.project?.title ?? "—",
       status: j.status,
       sizeBytes: j.outputPath ? await fileSize(j.outputPath) : 0,
       hasOutput: Boolean(j.outputPath),
@@ -144,7 +147,7 @@ export async function usageSummary(userId: string): Promise<UsageSummary> {
 /** Delete a finished render job the user owns, including its MP4. */
 export async function deleteRenderJob(userId: string, jobId: string) {
   const job = await prisma.renderJob.findFirst({
-    where: { id: jobId, tournament: { userId } },
+    where: { id: jobId, OR: [{ tournament: { userId } }, { project: { userId } }] },
   });
   if (!job) throw new Error("NOT_FOUND");
   if (job.status === "running" || job.status === "queued") throw new Error("JOB_ACTIVE");
@@ -206,16 +209,23 @@ export async function deleteUser(actorId: string, targetId: string) {
   if (actorId === targetId) throw new Error("SELF_CHANGE");
   const target = await prisma.user.findUnique({
     where: { id: targetId },
-    include: { tournaments: { include: { renderJobs: true } } },
+    include: {
+      tournaments: { include: { renderJobs: true } },
+      projects: { include: { renderJobs: true } },
+    },
   });
   if (!target) throw new Error("NOT_FOUND");
 
+  const jobs = [
+    ...target.tournaments.flatMap((t) => t.renderJobs),
+    ...target.projects.flatMap((p) => p.renderJobs),
+  ];
   for (const t of target.tournaments) {
     await removePath(path.join("tournaments", t.id));
-    for (const job of t.renderJobs) {
-      if (job.outputPath) await removePath(job.outputPath);
-      await removePath(path.join("renders", "tmp", job.id));
-    }
+  }
+  for (const job of jobs) {
+    if (job.outputPath) await removePath(job.outputPath);
+    await removePath(path.join("renders", "tmp", job.id));
   }
   await removePath(path.join("arts", targetId));
   await prisma.user.delete({ where: { id: targetId } });

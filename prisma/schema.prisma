@@ -23,6 +23,7 @@ model User {
   createdAt    DateTime     @default(now())
   tournaments  Tournament[]
   arts         Art[]
+  projects     VideoProject[]
 }
 
 // ---- Phase 1: tournament ----
@@ -88,17 +89,84 @@ model Ranking {
   @@unique([tournamentId, trackId])
 }
 
+// ---- Phase 6: standalone video projects (manual top / picker) ----
+
+model VideoProject {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title  String
+  kind   String // "top" | "picker"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Picker defaults; rounds inherit unless they override.
+  revealSec       Float   @default(4)
+  hideAfterReveal Boolean @default(false)
+  timerSec        Float   @default(5)
+  tickSound       Boolean @default(true)
+  bgArtId         String?
+  bgArt           Art?    @relation("ProjectBg", fields: [bgArtId], references: [id], onDelete: SetNull)
+  bgMusicArtId    String?
+  bgMusicArt      Art?    @relation("ProjectBgMusic", fields: [bgMusicArtId], references: [id], onDelete: SetNull)
+
+  rounds       PickerRound[]
+  renderConfig RenderConfig?
+  renderJobs   RenderJob[]
+}
+
+model PickerRound {
+  id        String       @id @default(cuid())
+  projectId String
+  project   VideoProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  order     Int
+  prompt     String?
+  showPrompt Boolean @default(true)
+  // "always" | "finale" | "never" — when tile labels are visible.
+  labelsMode String  @default("finale")
+  // Null = inherit the project default.
+  revealSec       Float?
+  hideAfterReveal Boolean?
+  timerSec        Float?
+  bgArtId      String?
+  bgArt        Art?    @relation("RoundBg", fields: [bgArtId], references: [id], onDelete: SetNull)
+  bgMusicArtId String?
+  bgMusicArt   Art?    @relation("RoundBgMusic", fields: [bgMusicArtId], references: [id], onDelete: SetNull)
+
+  tiles PickerTile[]
+}
+
+model PickerTile {
+  id      String      @id @default(cuid())
+  roundId String
+  round   PickerRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  order   Int
+  artId   String
+  art     Art    @relation(fields: [artId], references: [id], onDelete: Cascade)
+  label     String?
+  isAnswer  Boolean @default(false)
+  // Play the tile video's own sound during its reveal window (video with audio only).
+  playSound Boolean @default(true)
+  // Footage start offset for video tiles.
+  startSec  Float?
+  // Non-destructive 16:9 crop, same semantics as RenderItem.artCrop*.
+  cropX Float?
+  cropY Float?
+  cropW Float?
+  cropH Float?
+}
+
 // ---- Phase 2: render ----
 
-// Pool media: images and videos. Kept named "Art" for compatibility; kind
-// distinguishes the two.
+// Pool media: images, videos and (phase 6) audio. Kept named "Art" for
+// compatibility; kind distinguishes them.
 model Art {
   id       String  @id @default(cuid())
   userId   String
   user     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   filePath String
   label    String?
-  kind     String  @default("image") // "image" | "video"
+  kind     String  @default("image") // "image" | "video" | "audio"
   // Video-only metadata (probed at upload).
   durationSec Float?
   hasAudio    Boolean @default(false)
@@ -109,13 +177,23 @@ model Art {
   // Set when the art is assigned to a render item; drives the "recent" picker block.
   lastUsedAt DateTime?
 
-  renderItems RenderItem[]
+  renderItems      RenderItem[]
+  audioRenderItems RenderItem[]   @relation("RenderItemAudio")
+  pickerTiles      PickerTile[]
+  projectBgs       VideoProject[] @relation("ProjectBg")
+  projectMusics    VideoProject[] @relation("ProjectBgMusic")
+  roundBgs         PickerRound[]  @relation("RoundBg")
+  roundMusics      PickerRound[]  @relation("RoundBgMusic")
 }
 
 model RenderConfig {
   id             String   @id @default(cuid())
-  tournamentId   String   @unique
-  tournament     Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  // Exactly one owner: a tournament OR a standalone "top" project (validated
+  // in the service layer; SQLite has no check constraints via Prisma).
+  tournamentId   String?  @unique
+  tournament     Tournament? @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  projectId      String?  @unique
+  project        VideoProject? @relation(fields: [projectId], references: [id], onDelete: Cascade)
   orientation    String   @default("16x9")
   order          String   @default("desc") // "desc" (N->1) | "asc" (1->N)
   template       String   @default("default")
@@ -133,8 +211,12 @@ model RenderItem {
   id             String  @id @default(cuid())
   renderConfigId String
   renderConfig   RenderConfig @relation(fields: [renderConfigId], references: [id], onDelete: Cascade)
-  trackId        String
-  track          Track   @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  // Audio source of the position: a tournament track (tournament tops) OR a
+  // pool audio/sounded-video (manual tops). Exactly one is set.
+  trackId        String?
+  track          Track?  @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  audioArtId     String?
+  audioArt       Art?    @relation("RenderItemAudio", fields: [audioArtId], references: [id], onDelete: Cascade)
   rank           Int
   artId          String?
   art            Art?    @relation(fields: [artId], references: [id], onDelete: SetNull)
@@ -163,8 +245,11 @@ model RenderItem {
 
 model RenderJob {
   id             String   @id @default(cuid())
-  tournamentId   String
-  tournament     Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  // Exactly one owner: tournament or project (service-validated).
+  tournamentId   String?
+  tournament     Tournament? @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  projectId      String?
+  project        VideoProject? @relation(fields: [projectId], references: [id], onDelete: Cascade)
   status         String   @default("queued") // "queued" | "running" | "done" | "failed"
   progress       Float    @default(0)
   outputPath     String?

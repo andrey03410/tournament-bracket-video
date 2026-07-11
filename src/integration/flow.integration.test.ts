@@ -124,16 +124,16 @@ describe("Phase 1 + Phase 2 integration", () => {
     });
 
     const assembleItems: AssembleItem[] = config.items.map((it) => ({
-      trackId: it.trackId,
+      trackId: it.trackId!,
       rank: it.rank,
-      title: it.track.title,
-      artist: it.track.artist,
+      title: it.track!.title,
+      artist: it.track!.artist,
       customLabel: it.customLabel,
       clipMode: it.clipMode as "manual" | "active_snippet",
       clipStartSec: it.clipStartSec,
       clipEndSec: it.clipEndSec,
       snippetLenSec: it.snippetLenSec,
-      durationSec: it.track.durationSec,
+      durationSec: it.track!.durationSec,
       visual: null,
       audioRef: `/api/tracks/${it.trackId}/audio`,
     }));

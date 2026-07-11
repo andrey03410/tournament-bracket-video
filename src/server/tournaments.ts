@@ -248,7 +248,7 @@ async function syncRenderConfigToRanking(tournamentId: string) {
     }
   }
   for (const it of config.items) {
-    if (!desiredIds.has(it.trackId)) {
+    if (!desiredIds.has(it.trackId!)) {
       ops.push(prisma.renderItem.delete({ where: { id: it.id } }));
     }
   }

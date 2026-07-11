@@ -56,20 +56,58 @@ export async function ensureRenderConfig(userId: string, tournamentId: string) {
   return config.id;
 }
 
+const CONFIG_INCLUDE = {
+  items: {
+    orderBy: { rank: "asc" as const },
+    include: { track: true, art: true, audioArt: true },
+  },
+};
+
 export async function getRenderConfig(userId: string, tournamentId: string) {
   return prisma.renderConfig.findFirst({
     where: { tournamentId, tournament: { userId } },
-    include: {
-      items: {
-        orderBy: { rank: "asc" },
-        include: { track: true, art: true },
-      },
-    },
+    include: CONFIG_INCLUDE,
+  });
+}
+
+/** Render config of a standalone "top" project (manual top). */
+export async function getProjectRenderConfig(userId: string, projectId: string) {
+  return prisma.renderConfig.findFirst({
+    where: { projectId, project: { userId } },
+    include: CONFIG_INCLUDE,
   });
 }
 
 type LoadedConfig = NonNullable<Awaited<ReturnType<typeof getRenderConfig>>>;
 type LoadedItem = LoadedConfig["items"][number];
+
+/**
+ * The position's own audio source: a tournament track or (manual top) a pool
+ * audio/video. `key` is the stable id used for plan items and asset basenames.
+ */
+export function itemBase(it: LoadedItem) {
+  if (it.track) {
+    return {
+      key: it.trackId!,
+      title: it.track.title,
+      artist: it.track.artist,
+      ownFilePath: it.track.filePath,
+      ownDurationSec: it.track.durationSec,
+      ownIsVideo: it.track.kind === "video",
+      audioUrl: `/api/tracks/${it.trackId}/audio`,
+    };
+  }
+  const a = it.audioArt!;
+  return {
+    key: it.audioArtId!,
+    title: a.label ?? "Без названия",
+    artist: null,
+    ownFilePath: a.filePath,
+    ownDurationSec: a.durationSec,
+    ownIsVideo: a.kind === "video",
+    audioUrl: `/api/arts/${it.audioArtId}`,
+  };
+}
 
 /** Which files feed the position: attached media info + the effective audio source. */
 function resolveItemSources(it: LoadedItem) {
@@ -81,11 +119,12 @@ function resolveItemSources(it: LoadedItem) {
       }
     : null;
   const audioFromMedia = it.audioSource === "media" && mediaAudioAvailable(media);
+  const base = itemBase(it);
   return {
     media,
     audioFromMedia,
-    audioFilePath: audioFromMedia ? it.art!.filePath : it.track.filePath,
-    audioDurationSec: audioFromMedia ? it.art!.durationSec : it.track.durationSec,
+    audioFilePath: audioFromMedia ? it.art!.filePath : base.ownFilePath,
+    audioDurationSec: audioFromMedia ? it.art!.durationSec : base.ownDurationSec,
   };
 }
 
@@ -106,13 +145,14 @@ function previewVisual(it: LoadedItem, audioFromMedia: boolean): AssembleVisual 
     }
     return { kind: "image", ref, crop };
   }
-  if (it.track.kind === "video") {
-    // A video track shows its own footage, synced to its own audio clip.
+  const base = itemBase(it);
+  if (base.ownIsVideo) {
+    // A video audio-source shows its own footage, synced to its own audio clip.
     return {
       kind: "video",
-      ref: `/api/tracks/${it.trackId}/audio`,
+      ref: base.audioUrl,
       crop,
-      footageDurationSec: it.track.durationSec,
+      footageDurationSec: base.ownDurationSec,
       syncedToAudio: true,
     };
   }
@@ -127,6 +167,10 @@ function previewVisual(it: LoadedItem, audioFromMedia: boolean): AssembleVisual 
 export async function resolveActiveSnippets(userId: string, tournamentId: string) {
   const config = await getRenderConfig(userId, tournamentId);
   if (!config) return;
+  await resolveActiveSnippetsFor(config);
+}
+
+export async function resolveActiveSnippetsFor(config: LoadedConfig) {
 
   for (const it of config.items) {
     const s = resolveItemSources(it);
@@ -140,9 +184,14 @@ export async function resolveActiveSnippets(userId: string, tournamentId: string
             where: { id: it.artId! },
             data: { durationSec: duration },
           });
-        } else {
+        } else if (it.trackId) {
           await prisma.track.update({
             where: { id: it.trackId },
+            data: { durationSec: duration },
+          });
+        } else if (it.audioArtId) {
+          await prisma.art.update({
+            where: { id: it.audioArtId },
             data: { durationSec: duration },
           });
         }
@@ -168,11 +217,12 @@ export async function resolveActiveSnippets(userId: string, tournamentId: string
 export function buildPreviewPlan(config: LoadedConfig) {
   const items: AssembleItem[] = config.items.map((it) => {
     const s = resolveItemSources(it);
+    const base = itemBase(it);
     return {
-      trackId: it.trackId,
+      trackId: base.key,
       rank: it.rank,
-      title: it.track.title,
-      artist: it.track.artist,
+      title: base.title,
+      artist: base.artist,
       customLabel: it.customLabel,
       clipMode: it.clipMode as ClipMode,
       clipStartSec: it.clipStartSec,
@@ -181,9 +231,7 @@ export function buildPreviewPlan(config: LoadedConfig) {
       durationSec: s.audioDurationSec,
       resolvedStartSec: it.resolvedStartSec,
       visual: previewVisual(it, s.audioFromMedia),
-      audioRef: s.audioFromMedia
-        ? `/api/arts/${it.artId}`
-        : `/api/tracks/${it.trackId}/audio`,
+      audioRef: s.audioFromMedia ? `/api/arts/${it.artId}` : base.audioUrl,
     };
   });
 
@@ -203,9 +251,20 @@ export function buildPreviewPlan(config: LoadedConfig) {
 export async function startRenderJob(userId: string, tournamentId: string) {
   const config = await getRenderConfig(userId, tournamentId);
   if (!config) throw new Error("NO_CONFIG");
+  return queueTopRender({ tournamentId });
+}
 
+/** Start a render of a standalone "top" project (manual top). */
+export async function startProjectRenderJob(userId: string, projectId: string) {
+  const config = await getProjectRenderConfig(userId, projectId);
+  if (!config) throw new Error("NO_CONFIG");
+  if (config.items.length === 0) throw new Error("EMPTY_TOP");
+  return queueTopRender({ projectId });
+}
+
+async function queueTopRender(owner: { tournamentId?: string; projectId?: string }) {
   const job = await prisma.renderJob.create({
-    data: { tournamentId, status: "queued", progress: 0 },
+    data: { ...owner, status: "queued", progress: 0 },
   });
   // Fire-and-forget: render in the background, report progress via the job row.
   void runRender(job.id).catch(async (err) => {
@@ -230,8 +289,10 @@ async function runRender(jobId: string): Promise<void> {
   });
 
   const config = await prisma.renderConfig.findFirst({
-    where: { tournamentId: job.tournamentId },
-    include: { items: { orderBy: { rank: "asc" }, include: { track: true, art: true } } },
+    where: job.tournamentId
+      ? { tournamentId: job.tournamentId }
+      : { projectId: job.projectId! },
+    include: CONFIG_INCLUDE,
   });
   if (!config) throw new Error("NO_CONFIG");
 
@@ -244,6 +305,7 @@ async function runRender(jobId: string): Promise<void> {
   for (let i = 0; i < config.items.length; i++) {
     const it = config.items[i];
     const s = resolveItemSources(it);
+    const base = itemBase(it);
     const audioAbs = absPath(s.audioFilePath);
     const mode = it.clipMode as ClipMode;
 
@@ -253,10 +315,10 @@ async function runRender(jobId: string): Promise<void> {
 
     let clipSec = resolveClipSec(
       {
-        trackId: it.trackId,
+        trackId: base.key,
         rank: it.rank,
-        title: it.track.title,
-        artist: it.track.artist,
+        title: base.title,
+        artist: base.artist,
         customLabel: it.customLabel,
         clipMode: mode,
         clipStartSec: it.clipStartSec,
@@ -283,7 +345,7 @@ async function runRender(jobId: string): Promise<void> {
     }
     clipSec = Math.max(0.5, clipSec);
 
-    const audioBase = `${it.trackId}.aac`;
+    const audioBase = `${base.key}.aac`;
     try {
       await clipAudio(audioAbs, start, clipSec, path.join(publicDir, audioBase));
     } catch {
@@ -302,12 +364,12 @@ async function runRender(jobId: string): Promise<void> {
     } else {
       const footageRel = it.art
         ? it.art.filePath
-        : it.track.kind === "video"
-          ? it.track.filePath
+        : base.ownIsVideo
+          ? base.ownFilePath
           : null;
       if (footageRel) {
         const footageAbs = absPath(footageRel);
-        const visualBase = `${it.trackId}-visual.mp4`;
+        const visualBase = `${base.key}-visual.mp4`;
         // Footage synced to the audio (same file provides both) plays the exact
         // audio window; a visual-only video plays from its own offset and loops.
         const synced = it.art ? s.audioFromMedia : true;
@@ -339,10 +401,10 @@ async function runRender(jobId: string): Promise<void> {
 
     // Audio is pre-clipped, so the composition plays it from 0 for clipSec.
     assembleItems.push({
-      trackId: it.trackId,
+      trackId: base.key,
       rank: it.rank,
-      title: it.track.title,
-      artist: it.track.artist,
+      title: base.title,
+      artist: base.artist,
       customLabel: it.customLabel,
       clipMode: "manual",
       clipStartSec: 0,

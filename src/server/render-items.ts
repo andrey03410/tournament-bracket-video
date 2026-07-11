@@ -45,8 +45,11 @@ export async function patchRenderItem(
   patch: RenderItemPatch,
 ) {
   const item = await prisma.renderItem.findFirst({
-    where: { id: itemId, renderConfig: { tournament: { userId } } },
-    include: { art: true, track: true },
+    where: {
+      id: itemId,
+      renderConfig: { OR: [{ tournament: { userId } }, { project: { userId } }] },
+    },
+    include: { art: true, track: true, audioArt: true },
   });
   if (!item) throw new Error("NOT_FOUND");
 
@@ -91,8 +94,11 @@ export async function patchRenderItem(
     const parsed = parseArtCrop(artCrop);
     if (!parsed.ok) throw new Error("INVALID_CROP");
     if (parsed.crop) {
-      // A crop needs a visual to crop: attached media or the video track's footage.
-      if (!effectiveArt && item.track.kind !== "video") throw new Error("NO_ART");
+      // A crop needs a visual to crop: attached media or the own footage of the
+      // audio source (a video track, or a manual-top position fed by a pool video).
+      const ownFootage =
+        item.track?.kind === "video" || item.audioArt?.kind === "video";
+      if (!effectiveArt && !ownFootage) throw new Error("NO_ART");
       Object.assign(data, {
         artCropX: parsed.crop.x,
         artCropY: parsed.crop.y,

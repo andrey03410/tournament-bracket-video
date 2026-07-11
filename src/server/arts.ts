@@ -3,15 +3,18 @@ import path from "node:path";
 import { prisma } from "@/lib/db";
 import { saveFile, removePath, artPath, absPath } from "@/lib/storage";
 import { probeMediaInfo, extractPoster } from "@/lib/audio";
-import { VIDEO_EXT } from "@/lib/upload";
+import { AUDIO_EXT, VIDEO_EXT } from "@/lib/upload";
 import type { MediaKind } from "@/lib/domain/position-media";
+
+/** Pool media kinds: visuals (image/video) + phase-6 audio tracks. */
+export type PoolKind = MediaKind | "audio";
 
 // Service layer for the user's media pool (images + videos): listing/search/
 // pagination, upload, rename, delete. Kept framework-free (thin routes on top)
 // so the full behavior is covered by integration tests against the real schema.
 
 export const IMG_EXT = [".jpg", ".jpeg", ".png", ".webp", ".gif"];
-export { VIDEO_EXT };
+export { VIDEO_EXT, AUDIO_EXT };
 
 const DEFAULT_LIMIT = 40;
 const MAX_LIMIT = 100;
@@ -21,7 +24,7 @@ export interface ArtRow {
   id: string;
   label: string | null;
   filePath: string;
-  kind: MediaKind;
+  kind: PoolKind;
   durationSec: number | null;
   hasAudio: boolean;
   posterPath: string | null;
@@ -41,7 +44,7 @@ function toRow(a: ArtWithCount): ArtRow {
     id: a.id,
     label: a.label,
     filePath: a.filePath,
-    kind: a.kind as MediaKind,
+    kind: a.kind as PoolKind,
     durationSec: a.durationSec,
     hasAudio: a.hasAudio,
     posterPath: a.posterPath,
@@ -53,7 +56,7 @@ function toRow(a: ArtWithCount): ArtRow {
 
 export interface ListArtsOptions {
   q?: string;
-  kind?: MediaKind;
+  kind?: PoolKind;
   cursor?: string;
   limit?: number;
 }
@@ -123,11 +126,13 @@ export async function poolUsageBytes(userId: string): Promise<number> {
  */
 export async function createArt(userId: string, input: CreateArtInput) {
   const ext = (path.extname(input.fileName) || ".jpg").toLowerCase();
-  const kind: MediaKind | null = IMG_EXT.includes(ext)
+  const kind: PoolKind | null = IMG_EXT.includes(ext)
     ? "image"
     : VIDEO_EXT.includes(ext)
       ? "video"
-      : null;
+      : AUDIO_EXT.includes(ext)
+        ? "audio"
+        : null;
   if (!kind) throw new Error("BAD_EXT");
 
   const label =
@@ -154,10 +159,12 @@ export async function createArt(userId: string, input: CreateArtInput) {
   let durationSec: number | null = null;
   let hasAudio = false;
   let posterPath: string | null = null;
-  if (kind === "video") {
+  if (kind === "video" || kind === "audio") {
     const info = await probeMediaInfo(absPath(rel));
     durationSec = info.durationSec;
     hasAudio = info.hasAudio;
+  }
+  if (kind === "video") {
     const posterRel = artPath(userId, `${art.id}.poster`, ".jpg");
     try {
       await extractPoster(absPath(rel), absPath(posterRel));
