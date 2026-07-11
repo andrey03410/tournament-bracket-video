@@ -24,6 +24,7 @@ export default async function RootLayout({
             </a>
             {user ? (
               <nav className="row" style={{ gap: 14 }}>
+                <a href="/projects">Мои видео</a>
                 <a href="/tournaments">Мои топы</a>
                 <a href="/account">Личный кабинет</a>
                 {can(user.role, "admin:users") ? <a href="/admin">Админка</a> : null}

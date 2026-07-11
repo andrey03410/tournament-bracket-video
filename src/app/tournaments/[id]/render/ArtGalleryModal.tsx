@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import Cropper, { type Area } from "react-easy-crop";
 import type { ArtCrop } from "@/lib/domain/art-crop";
 
-export type GalleryKind = "image" | "video";
+export type GalleryKind = "image" | "video" | "audio";
 
 export interface GalleryArt {
   id: string;
@@ -129,6 +129,7 @@ export function ArtGalleryModal({
   onPick,
   onClose,
   onPoolChange,
+  pickKinds = ["image", "video"],
 }: {
   mode: "manage" | "pick" | "crop";
   /** For mode="crop": the media being re-cropped and its current crop. */
@@ -137,6 +138,8 @@ export function ArtGalleryModal({
   onClose: () => void;
   /** Called after uploads/deletes so the parent can refresh its own art usages. */
   onPoolChange?: () => void;
+  /** Which pool kinds are selectable in mode="pick" (others are hidden). */
+  pickKinds?: GalleryKind[];
 }) {
   const [arts, setArts] = useState<GalleryArt[]>([]);
   const [recent, setRecent] = useState<GalleryArt[]>([]);
@@ -218,7 +221,9 @@ export function ArtGalleryModal({
       (f) =>
         f.type.startsWith("image/") ||
         f.type.startsWith("video/") ||
-        /\.(mp4|webm|mov)$/i.test(f.name), // .mov often arrives with an empty MIME type
+        f.type.startsWith("audio/") ||
+        // .mov/.m4a often arrive with an empty MIME type
+        /\.(mp4|webm|mov|mp3|m4a|aac|flac|wav|ogg|opus)$/i.test(f.name),
     );
     if (!media.length) return;
     setBusy(true);
@@ -264,6 +269,9 @@ export function ArtGalleryModal({
         ? "Менеджер медиа"
         : "Выбор медиа";
 
+  const visible = (list: GalleryArt[]) =>
+    mode === "pick" ? list.filter((a) => pickKinds.includes(a.kind)) : list;
+
   function card(a: GalleryArt, selectable: boolean) {
     return (
       <div
@@ -271,11 +279,16 @@ export function ArtGalleryModal({
         className={`art-card${selectable ? " selectable" : ""}`}
         onClick={
           selectable
-            ? () => setCropArt({ artId: a.id, artUrl: a.url, kind: a.kind, crop: null })
+            ? () =>
+                a.kind === "audio"
+                  ? onPick?.({ artId: a.id, crop: null })
+                  : setCropArt({ artId: a.id, artUrl: a.url, kind: a.kind, crop: null })
             : undefined
         }
       >
-        {a.kind === "video" && !a.posterUrl ? (
+        {a.kind === "audio" ? (
+          <div className="thumb audio-thumb">🎵</div>
+        ) : a.kind === "video" && !a.posterUrl ? (
           <video className="thumb" src={a.url} muted preload="metadata" />
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
@@ -291,6 +304,8 @@ export function ArtGalleryModal({
             🎬 {fmtDuration(a.durationSec)}
             {a.hasAudio ? "" : " · без звука"}
           </span>
+        ) : a.kind === "audio" ? (
+          <span className="art-badge">🎵 {fmtDuration(a.durationSec)}</span>
         ) : null}
         {mode === "manage" ? (
           <>
@@ -362,11 +377,11 @@ export function ArtGalleryModal({
               >
                 {busy
                   ? "Загрузка…"
-                  : "Перетащите картинки или видео сюда или нажмите, чтобы выбрать"}
+                  : "Перетащите картинки, видео или аудио сюда или нажмите, чтобы выбрать"}
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/*,video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov"
+                  accept="image/*,video/mp4,video/webm,video/quicktime,audio/*,.mp4,.webm,.mov,.mp3,.m4a,.aac,.flac,.wav,.ogg,.opus"
                   multiple
                   hidden
                   onChange={(e) => {
@@ -389,8 +404,14 @@ export function ArtGalleryModal({
                       ["", "Все"],
                       ["image", "Картинки"],
                       ["video", "Видео"],
+                      ["audio", "Аудио"],
                     ] as const
-                  ).map(([value, label]) => (
+                  )
+                    .filter(
+                      ([value]) =>
+                        mode !== "pick" || value === "" || pickKinds.includes(value),
+                    )
+                    .map(([value, label]) => (
                     <button
                       key={value}
                       className={`btn ghost${kindFilter === value ? " active" : ""}`}
@@ -406,7 +427,7 @@ export function ArtGalleryModal({
                 <>
                   <p className="muted" style={{ fontSize: 13, margin: "0 0 8px" }}>Недавние</p>
                   <div className="art-grid" style={{ marginBottom: 14 }}>
-                    {recent.map((a) => card(a, true))}
+                    {visible(recent).map((a) => card(a, true))}
                   </div>
                   <p className="muted" style={{ fontSize: 13, margin: "0 0 8px" }}>Все</p>
                 </>
@@ -419,7 +440,7 @@ export function ArtGalleryModal({
                     : "Пул пуст — загрузите первые картинки или видео."}
                 </p>
               ) : (
-                <div className="art-grid">{arts.map((a) => card(a, mode === "pick"))}</div>
+                <div className="art-grid">{visible(arts).map((a) => card(a, mode === "pick"))}</div>
               )}
               <div ref={sentinelRef} style={{ height: 1 }} />
             </>

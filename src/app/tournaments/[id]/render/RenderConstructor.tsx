@@ -95,6 +95,7 @@ interface ConfigDto {
 type ModalState =
   | { kind: "manage" }
   | { kind: "pick"; itemId: string }
+  | { kind: "add" }
   | {
       kind: "crop";
       itemId: string;
@@ -115,10 +116,17 @@ interface JobDto {
 export function RenderConstructor({
   tournamentId,
   canRender,
+  baseUrl: baseUrlProp,
+  manualProjectId,
 }: {
-  tournamentId: string;
+  tournamentId?: string;
   canRender: boolean;
+  /** API base owning the render config; defaults to the tournament API. */
+  baseUrl?: string;
+  /** Set for manual-top projects: enables add/remove/reorder of positions. */
+  manualProjectId?: string;
 }) {
+  const baseUrl = baseUrlProp ?? `/api/tournaments/${tournamentId}`;
   const [config, setConfig] = useState<ConfigDto | null>(null);
   const [plan, setPlan] = useState<VideoPlan | null>(null);
   const [modal, setModal] = useState<ModalState>(null);
@@ -127,7 +135,7 @@ export function RenderConstructor({
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadConfig = useCallback(async () => {
-    const res = await fetch(`/api/tournaments/${tournamentId}/render/config`, {
+    const res = await fetch(`${baseUrl}/render/config`, {
       cache: "no-store",
     });
     if (!res.ok) {
@@ -137,7 +145,7 @@ export function RenderConstructor({
     const data = await res.json();
     setConfig(data.config);
     setPlan(data.previewPlan);
-  }, [tournamentId]);
+  }, [baseUrl]);
 
   useEffect(() => {
     void loadConfig();
@@ -147,7 +155,7 @@ export function RenderConstructor({
   }, [loadConfig]);
 
   async function patchConfig(partial: Record<string, unknown>) {
-    await fetch(`/api/tournaments/${tournamentId}/render/config`, {
+    await fetch(`${baseUrl}/render/config`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(partial),
@@ -169,6 +177,51 @@ export function RenderConstructor({
     await patchItem(itemId, { artId: res.artId, artCrop: res.crop });
   }
 
+  async function addPosition(res: PickResult) {
+    setModal(null);
+    setError(null);
+    const resp = await fetch(`/api/projects/${manualProjectId}/items`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ audioArtId: res.artId }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      setError(data.error ?? "Не удалось добавить позицию");
+      return;
+    }
+    // A crop chosen while picking applies to the position's own footage.
+    if (res.crop) {
+      await fetch(`/api/render-items/${data.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ artCrop: res.crop }),
+      });
+    }
+    await loadConfig();
+  }
+
+  async function removePosition(itemId: string) {
+    if (!confirm("Удалить позицию из топа?")) return;
+    await fetch(`/api/projects/${manualProjectId}/items/${itemId}`, { method: "DELETE" });
+    await loadConfig();
+  }
+
+  async function movePosition(itemId: string, dir: -1 | 1) {
+    if (!config) return;
+    const ids = config.items.map((it) => it.id);
+    const i = ids.indexOf(itemId);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    await fetch(`/api/projects/${manualProjectId}/items`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ order: ids }),
+    });
+    await loadConfig();
+  }
+
   function pollJob(jobId: string) {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
@@ -184,7 +237,7 @@ export function RenderConstructor({
 
   async function startRender() {
     setError(null);
-    const res = await fetch(`/api/tournaments/${tournamentId}/render`, { method: "POST" });
+    const res = await fetch(`${baseUrl}/render`, { method: "POST" });
     const data = await res.json();
     if (!res.ok) {
       setError(data.error ?? "Не удалось запустить рендер");
@@ -292,7 +345,20 @@ export function RenderConstructor({
       </div>
 
       <div className="panel">
-        <h2>Элементы топа</h2>
+        <div className="row" style={{ justifyContent: "space-between" }}>
+          <h2 style={{ margin: 0 }}>Элементы топа</h2>
+          {manualProjectId ? (
+            <button className="btn" onClick={() => setModal({ kind: "add" })}>
+              ➕ Добавить позицию
+            </button>
+          ) : null}
+        </div>
+        {manualProjectId && config.items.length === 0 ? (
+          <p className="muted" style={{ marginTop: 12 }}>
+            Пока пусто. Добавьте позиции из пула медиа: аудио-файл или видео со
+            звуком станет источником звука позиции.
+          </p>
+        ) : null}
         {config.items.map((it) => (
           <div key={it.id} style={{ borderBottom: "1px solid var(--border)", padding: "16px 0" }}>
             <div className="row" style={{ justifyContent: "space-between" }}>
@@ -300,6 +366,13 @@ export function RenderConstructor({
                 #{it.rank} — {it.title}
                 {it.artist ? <span className="muted"> ({it.artist})</span> : null}
               </strong>
+              {manualProjectId ? (
+                <div className="row" style={{ gap: 6 }}>
+                  <button className="btn ghost" title="Выше" onClick={() => void movePosition(it.id, -1)}>↑</button>
+                  <button className="btn ghost" title="Ниже" onClick={() => void movePosition(it.id, 1)}>↓</button>
+                  <button className="btn ghost" onClick={() => void removePosition(it.id)}>✕</button>
+                </div>
+              ) : null}
             </div>
 
             <div className="grid-2" style={{ marginTop: 10 }}>
@@ -510,7 +583,8 @@ export function RenderConstructor({
 
       {modal ? (
         <ArtGalleryModal
-          mode={modal.kind}
+          mode={modal.kind === "add" ? "pick" : modal.kind}
+          pickKinds={modal.kind === "add" ? ["audio", "video"] : ["image", "video"]}
           cropTarget={
             modal.kind === "crop"
               ? { artUrl: modal.url, kind: modal.mediaKind, crop: modal.crop }
@@ -519,12 +593,14 @@ export function RenderConstructor({
           onPick={
             modal.kind === "pick"
               ? (res) => void applyPick(modal.itemId, res)
-              : modal.kind === "crop"
-                ? (res) => {
-                    setModal(null);
-                    void patchItem(modal.itemId, { artCrop: res.crop });
-                  }
-                : undefined
+              : modal.kind === "add"
+                ? (res) => void addPosition(res)
+                : modal.kind === "crop"
+                  ? (res) => {
+                      setModal(null);
+                      void patchItem(modal.itemId, { artCrop: res.crop });
+                    }
+                  : undefined
           }
           onClose={() => setModal(null)}
           onPoolChange={() => void loadConfig()}
