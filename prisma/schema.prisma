@@ -257,6 +257,23 @@ model RenderItem {
   @@unique([renderConfigId, trackId])
 }
 
+// Background URL-import job (yt-dlp): downloads a video/audio into the pool.
+model DownloadJob {
+  id       String @id @default(cuid())
+  userId   String
+  url      String
+  mode     String @default("video") // "video" | "audio"
+  quality  Int    @default(1080)    // max height for video mode
+  title    String?
+  status   String @default("queued") // "queued" | "running" | "done" | "failed" | "canceled"
+  progress Float  @default(0)
+  error    String?
+  // Filled on success: the pool media created from the download.
+  artId    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model RenderJob {
   id             String   @id @default(cuid())
   // Exactly one owner: tournament or project (service-validated).

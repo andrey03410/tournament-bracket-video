@@ -180,6 +180,82 @@ export async function createArt(userId: string, input: CreateArtInput) {
   });
 }
 
+export interface CreateArtFromFileInput {
+  /** Absolute path of an existing file to absorb into the pool (moved/copied). */
+  sourcePath: string;
+  fileName: string;
+  label?: string | null;
+  maxPoolBytes?: number | null;
+}
+
+/**
+ * Absorb an on-disk file into the pool without buffering it in memory
+ * (URL imports can be hundreds of MB). Same transactional quota claim and
+ * probing/poster flow as createArt.
+ */
+export async function createArtFromFile(userId: string, input: CreateArtFromFileInput) {
+  const ext = (path.extname(input.fileName) || path.extname(input.sourcePath) || "").toLowerCase();
+  const kind: PoolKind | null = IMG_EXT.includes(ext)
+    ? "image"
+    : VIDEO_EXT.includes(ext)
+      ? "video"
+      : AUDIO_EXT.includes(ext)
+        ? "audio"
+        : null;
+  if (!kind) throw new Error("BAD_EXT");
+
+  const { stat, copyFile, rename, unlink } = await import("node:fs/promises");
+  const sizeBytes = (await stat(input.sourcePath)).size;
+
+  const label =
+    input.label?.trim() ||
+    path.basename(input.fileName, path.extname(input.fileName)).trim() ||
+    null;
+
+  const art = await prisma.$transaction(async (tx) => {
+    const max = input.maxPoolBytes ?? null;
+    if (max !== null) {
+      const agg = await tx.art.aggregate({ where: { userId }, _sum: { sizeBytes: true } });
+      const used = agg._sum.sizeBytes ?? 0;
+      if (used + sizeBytes > max) throw new Error("POOL_QUOTA");
+    }
+    return tx.art.create({ data: { userId, filePath: "", label, kind, sizeBytes } });
+  });
+
+  const rel = artPath(userId, art.id, ext);
+  const dest = absPath(rel);
+  await (await import("node:fs/promises")).mkdir(path.dirname(dest), { recursive: true });
+  try {
+    await rename(input.sourcePath, dest); // same volume: cheap move
+  } catch {
+    await copyFile(input.sourcePath, dest);
+    await unlink(input.sourcePath).catch(() => {});
+  }
+
+  let durationSec: number | null = null;
+  let hasAudio = false;
+  let posterPath: string | null = null;
+  if (kind === "video" || kind === "audio") {
+    const info = await probeMediaInfo(dest);
+    durationSec = info.durationSec;
+    hasAudio = info.hasAudio;
+  }
+  if (kind === "video") {
+    const posterRel = artPath(userId, `${art.id}.poster`, ".jpg");
+    try {
+      await extractPoster(dest, absPath(posterRel));
+      posterPath = posterRel;
+    } catch {
+      // no extractable frame -> cards fall back to a generic tile
+    }
+  }
+
+  return prisma.art.update({
+    where: { id: art.id },
+    data: { filePath: rel, durationSec, hasAudio, posterPath },
+  });
+}
+
 async function ownedArt(userId: string, artId: string) {
   const art = await prisma.art.findFirst({ where: { id: artId, userId } });
   if (!art) throw new Error("NOT_FOUND");
