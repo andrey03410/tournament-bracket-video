@@ -45,6 +45,9 @@ describe("buildDownloadArgs", () => {
     // url must come after "--" so a crafted "-..." string can't inject flags
     expect(args.slice(-2)).toEqual(["--", "https://youtu.be/x"]);
     expect(args).toContain("--ffmpeg-location");
+    // fail-fast network settings + JS runtime for YouTube challenges
+    expect(args.join(" ")).toContain("--socket-timeout 15");
+    expect(args.join(" ")).toContain("--js-runtimes node");
   });
 
   it("audio: extracts m4a, no merge flag", () => {
@@ -113,5 +116,8 @@ describe("error classification", () => {
       describeDownloadError("File is larger than max-filesize"),
     ).toContain("квоты");
     expect(describeDownloadError("")).toContain("Не удалось");
+    expect(
+      describeDownloadError("[download] Got error: _ssl.c:983: The handshake operation timed out"),
+    ).toContain("CDN");
   });
 });

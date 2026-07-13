@@ -160,6 +160,18 @@ async function runDownload(jobId: string, maxPoolBytes: number | null): Promise<
 
 /** Active + recent jobs for the user's downloads panel. */
 export async function listDownloads(userId: string, limit = 15) {
+  // A server restart orphans in-flight jobs (the process registry is memory).
+  // Live jobs bump updatedAt sub-second via progress writes, so anything
+  // "active" but stale for minutes is dead — surface that honestly.
+  const staleBefore = new Date(Date.now() - 10 * 60 * 1000);
+  await prisma.downloadJob.updateMany({
+    where: {
+      userId,
+      status: { in: ["queued", "running"] },
+      updatedAt: { lt: staleBefore },
+    },
+    data: { status: "failed", error: "Загрузка прервана перезапуском сервера — повторите" },
+  });
   return prisma.downloadJob.findMany({
     where: { userId },
     orderBy: { createdAt: "desc" },

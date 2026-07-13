@@ -49,6 +49,15 @@ export function buildDownloadArgs(input: DownloadArgsInput): string[] {
     "--no-playlist",
     "--no-mtime",
     "--newline",
+    // fail fast on unreachable CDNs instead of 10 long retry cycles
+    "--socket-timeout",
+    "15",
+    "--retries",
+    "3",
+    // Node is always present (it runs this app); a JS runtime unlocks the
+    // formats YouTube hides behind script challenges
+    "--js-runtimes",
+    "node",
     "--ffmpeg-location",
     input.ffmpegPath,
     "-P",
@@ -163,7 +172,12 @@ export function describeDownloadError(stderr: string): string {
   const lines = stderr
     .split("\n")
     .map((l) => l.trim())
-    .filter((l) => l.startsWith("ERROR") || l.includes("max-filesize"));
+    .filter(
+      (l) =>
+        l.startsWith("ERROR") ||
+        l.includes("max-filesize") ||
+        l.includes("Got error"),
+    );
   const last = lines[lines.length - 1];
   if (!last) return "Не удалось скачать по этой ссылке";
   if (/max-filesize/i.test(last)) {
@@ -174,6 +188,9 @@ export function describeDownloadError(stderr: string): string {
   }
   if (/Video unavailable|Private video|members-only/i.test(last)) {
     return "Видео недоступно (удалено, приватное или с ограничением доступа)";
+  }
+  if (/handshake operation timed out|Connection (?:refused|reset)|timed out|Unable to connect/i.test(last)) {
+    return "Сеть сервера не дотянулась до видео-CDN (таймаут) — проверьте доступ к googlevideo.com или попробуйте позже";
   }
   return last.replace(/^ERROR:\s*/i, "").slice(0, 300);
 }

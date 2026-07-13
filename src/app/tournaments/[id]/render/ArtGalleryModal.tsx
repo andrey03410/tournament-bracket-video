@@ -118,6 +118,155 @@ function CropStep({
   );
 }
 
+interface DownloadJobDto {
+  id: string;
+  url: string;
+  mode: "video" | "audio";
+  quality: number;
+  title: string | null;
+  status: "queued" | "running" | "done" | "failed" | "canceled";
+  progress: number;
+  error: string | null;
+  artId: string | null;
+}
+
+/**
+ * Paste-a-link import: URL field + mode/quality + background download list.
+ * Downloads keep running server-side when the modal (or the tab) is closed.
+ */
+function UrlImportPanel({ onPoolChange }: { onPoolChange: () => void }) {
+  const [url, setUrl] = useState("");
+  const [mode, setMode] = useState<"1080" | "720" | "480" | "audio">("1080");
+  const [jobs, setJobs] = useState<DownloadJobDto[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const doneIdsRef = useRef<Set<string>>(new Set());
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const refresh = useCallback(async () => {
+    const res = await fetch("/api/downloads", { cache: "no-store" });
+    if (!res.ok) return;
+    const data = await res.json();
+    const list: DownloadJobDto[] = data.jobs;
+    setJobs(list);
+    // a job finishing while we watch -> refresh the pool grid
+    for (const j of list) {
+      if (j.status === "done" && !doneIdsRef.current.has(j.id)) {
+        doneIdsRef.current.add(j.id);
+        onPoolChange();
+      }
+    }
+    return list;
+  }, [onPoolChange]);
+
+  useEffect(() => {
+    void refresh().then((list) => {
+      for (const j of list ?? []) if (j.status === "done") doneIdsRef.current.add(j.id);
+    });
+    timerRef.current = setInterval(() => void refresh(), 1500);
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [refresh]);
+
+  async function start() {
+    setError(null);
+    if (!url.trim()) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/downloads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url,
+          mode: mode === "audio" ? "audio" : "video",
+          quality: mode === "audio" ? undefined : Number(mode),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Не удалось начать загрузку");
+      setUrl("");
+      await refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancel(job: DownloadJobDto) {
+    await fetch(`/api/downloads/${job.id}`, { method: "DELETE" });
+    await refresh();
+  }
+
+  const active = jobs.filter((j) => j.status === "queued" || j.status === "running");
+  const finished = jobs.filter((j) => j.status !== "queued" && j.status !== "running");
+
+  return (
+    <div className="url-import">
+      <div className="row" style={{ gap: 8, alignItems: "center" }}>
+        <input
+          placeholder="🔗 Ссылка на видео (YouTube и другие сайты)…"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && void start()}
+          style={{ flex: 1, marginBottom: 0 }}
+        />
+        <select
+          value={mode}
+          onChange={(e) => setMode(e.target.value as typeof mode)}
+          style={{ width: 170, marginBottom: 0 }}
+        >
+          <option value="1080">Видео до 1080p</option>
+          <option value="720">Видео до 720p</option>
+          <option value="480">Видео до 480p</option>
+          <option value="audio">Только звук (m4a)</option>
+        </select>
+        <button className="btn secondary" disabled={busy || !url.trim()} onClick={() => void start()}>
+          ⬇ Скачать
+        </button>
+      </div>
+      {error ? <div className="error" style={{ marginTop: 8 }}>{error}</div> : null}
+
+      {active.length + finished.length > 0 ? (
+        <div style={{ marginTop: 10 }}>
+          {[...active, ...finished.slice(0, 4)].map((j) => (
+            <div className="row" key={j.id} style={{ gap: 8, alignItems: "center", marginBottom: 6 }}>
+              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13 }}>
+                {j.mode === "audio" ? "🎵" : "🎬"} {j.title ?? j.url}
+              </span>
+              {j.status === "running" || j.status === "queued" ? (
+                <>
+                  <div className="progressbar" style={{ width: 140, margin: 0 }}>
+                    <div style={{ width: `${Math.round(j.progress * 100)}%` }} />
+                  </div>
+                  <span className="muted" style={{ fontSize: 12, width: 38 }}>
+                    {Math.round(j.progress * 100)}%
+                  </span>
+                </>
+              ) : j.status === "done" ? (
+                <span style={{ fontSize: 12, color: "#7be29a" }}>готово — в пуле</span>
+              ) : j.status === "canceled" ? (
+                <span className="muted" style={{ fontSize: 12 }}>отменено</span>
+              ) : (
+                <span className="error-text" style={{ fontSize: 12, maxWidth: 280 }} title={j.error ?? ""}>
+                  {j.error ?? "ошибка"}
+                </span>
+              )}
+              <button className="btn ghost" title={j.status === "running" || j.status === "queued" ? "Отменить" : "Убрать из списка"} onClick={() => void cancel(j)}>
+                ✕
+              </button>
+            </div>
+          ))}
+          <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
+            Загрузка идёт на сервере — окно можно закрыть, файл появится в пуле.
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * Art gallery modal. mode="manage": upload (multi + drag&drop), rename, delete.
  * mode="pick": search + recent + infinite grid, click -> crop step -> onPick.
@@ -390,6 +539,13 @@ export function ArtGalleryModal({
                   }}
                 />
               </div>
+
+              <UrlImportPanel
+                onPoolChange={() => {
+                  void loadFirstPage(query, kindFilter);
+                  onPoolChange?.();
+                }}
+              />
 
               <div className="row" style={{ gap: 8, marginBottom: 12 }}>
                 <input
