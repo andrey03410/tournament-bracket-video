@@ -43,7 +43,7 @@ export const ROLES: Record<string, RoleDef> = {
   admin: {
     label: "Администратор",
     permissions: ["tournament:create", "media:upload", "render:run", "admin:users"],
-    quotas: { maxTournaments: null, maxArchiveBytes: 2 * GB, maxPoolBytes: null },
+    quotas: { maxTournaments: null, maxArchiveBytes: 10 * GB, maxPoolBytes: null },
   },
 };
 

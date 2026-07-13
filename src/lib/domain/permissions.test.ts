@@ -56,11 +56,11 @@ describe("quotas", () => {
     expect(q.maxPoolBytes).toBe(100 * MB);
   });
 
-  it("admin: unlimited tournaments and pool, 2 GB archive", () => {
+  it("admin: unlimited tournaments and pool, 10 GB archive", () => {
     const q = quotasFor("admin");
     expect(q.maxTournaments).toBeNull();
     expect(q.maxPoolBytes).toBeNull();
-    expect(q.maxArchiveBytes).toBe(2 * 1024 * MB);
+    expect(q.maxArchiveBytes).toBe(10 * 1024 * MB);
   });
 
   it("canCreateTournament enforces the slot count", () => {

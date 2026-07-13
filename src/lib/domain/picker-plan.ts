@@ -15,6 +15,7 @@ export const PROMPT_INTRO_SEC = 1.5; // beat before the first tile when a prompt
 export const NO_PROMPT_INTRO_SEC = 0.5;
 export const ANSWER_SEC = 2.5; // answer-highlight phase
 export const ROUND_GAP_SEC = 0.7; // dark gap between rounds
+export const MUSIC_FADE_SEC = 1; // playlist crossfade (and loop) length
 
 export type LabelsMode = "always" | "finale" | "never";
 
@@ -71,6 +72,60 @@ export interface PlanTile {
   showLabelAtFinale: boolean;
 }
 
+export interface MusicTrackInput {
+  /** Opaque ref: URL for preview, file basename for render. */
+  ref: string;
+  durationSec: number | null;
+}
+
+export interface MusicCue {
+  ref: string;
+  fromSec: number;
+  durationSec: number;
+  fadeInSec: number;
+  fadeOutSec: number;
+}
+
+export interface PlanMusic {
+  cues: MusicCue[];
+  /** Rounds with their own music override: the playlist is silent there. */
+  muteWindows: { fromSec: number; toSec: number }[];
+  /** Tile-sound windows of rounds WITHOUT an override (playlist ducks there). */
+  duckWindows: { fromSec: number; toSec: number }[];
+}
+
+/**
+ * Lay the playlist over the whole video: tracks back to back with a crossfade
+ * overlap, looping until the video ends. The last cue may overhang the video
+ * end (the composition clamps it).
+ */
+export function buildMusicCues(
+  tracks: MusicTrackInput[],
+  totalSec: number,
+): MusicCue[] {
+  const usable = tracks.filter((t) => (t.durationSec ?? 0) > 0.2);
+  if (usable.length === 0 || totalSec <= 0) return [];
+  const cues: MusicCue[] = [];
+  let t = 0;
+  let i = 0;
+  while (t < totalSec && cues.length < 500) {
+    const track = usable[i % usable.length];
+    const durationSec = Math.min(track.durationSec!, totalSec - t + MUSIC_FADE_SEC);
+    cues.push({
+      ref: track.ref,
+      fromSec: t,
+      durationSec,
+      fadeInSec: MUSIC_FADE_SEC,
+      fadeOutSec: MUSIC_FADE_SEC,
+    });
+    // advance by the audible (non-overlapped) part; floor keeps progress even
+    // for pathologically short tracks
+    t += Math.max(0.5, durationSec - MUSIC_FADE_SEC);
+    i++;
+  }
+  return cues;
+}
+
 export interface PlanRound {
   index: number;
   startSec: number;
@@ -82,6 +137,8 @@ export interface PlanRound {
   tickSound: boolean;
   /** Answer-highlight phase start; null when the round has no marked answer. */
   answerAtSec: number | null;
+  /** Tile own-sound windows of this round (absolute sec). */
+  duckWindows: { fromSec: number; toSec: number }[];
   bg: { kind: "image" | "video"; ref: string; durationSec: number | null } | null;
   bgMusic: {
     ref: string;
@@ -98,11 +155,14 @@ export interface PickerPlan {
   durationSec: number;
   durationInFrames: number;
   rounds: PlanRound[];
+  /** Continuous background playlist; null when the project has none. */
+  music: PlanMusic | null;
 }
 
 export function buildPickerPlan(
   defaults: PickerDefaults,
   rounds: PlanRoundInput[],
+  playlist: MusicTrackInput[] = [],
 ): PickerPlan {
   let cursor = 0;
   const planRounds: PlanRound[] = [];
@@ -182,6 +242,7 @@ export function buildPickerPlan(
       timerSec,
       tickSound: defaults.tickSound,
       answerAtSec,
+      duckWindows,
       bg: round.bg,
       bgMusic: round.bgMusic
         ? { ref: round.bgMusic.ref, durationSec: round.bgMusic.durationSec, duckWindows }
@@ -191,6 +252,21 @@ export function buildPickerPlan(
   });
 
   const durationSec = Math.max(cursor, 1);
+
+  let music: PlanMusic | null = null;
+  if (playlist.length > 0) {
+    music = {
+      cues: buildMusicCues(playlist, durationSec),
+      // rounds with their own music silence the playlist for their span
+      muteWindows: planRounds
+        .filter((r) => r.bgMusic)
+        .map((r) => ({ fromSec: r.startSec, toSec: r.endSec })),
+      duckWindows: planRounds
+        .filter((r) => !r.bgMusic)
+        .flatMap((r) => r.duckWindows),
+    };
+  }
+
   return {
     fps: FPS,
     width: WIDTH,
@@ -198,5 +274,6 @@ export function buildPickerPlan(
     durationSec,
     durationInFrames: Math.round(durationSec * FPS),
     rounds: planRounds,
+    music,
   };
 }

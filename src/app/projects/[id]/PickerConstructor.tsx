@@ -58,6 +58,7 @@ interface ProjectDto {
   tickSound: boolean;
   bgArt: ArtDto | null;
   bgMusicArt: ArtDto | null;
+  playlist: ArtDto[];
   rounds: RoundDto[];
   invalidRounds: number[];
 }
@@ -72,7 +73,7 @@ interface JobDto {
 type ModalState =
   | { kind: "manage" }
   | { kind: "bg"; roundId: string | null } // null = project default
-  | { kind: "music"; roundId: string | null }
+  | { kind: "music"; roundId: string | null } // roundId=null -> append to the playlist
   | { kind: "tile"; roundId: string }
   | { kind: "crop"; tileId: string; url: string; mediaKind: "image" | "video"; crop: ArtCrop | null }
   | null;
@@ -167,6 +168,9 @@ export function PickerConstructor({
   const patchTile = (tileId: string, body: Record<string, unknown>) =>
     call(`/api/tiles/${tileId}`, "PATCH", body);
 
+  const savePlaylist = (artIds: string[]) =>
+    call(`/api/projects/${projectId}/playlist`, "PUT", { artIds });
+
   async function moveRound(roundId: string, dir: -1 | 1) {
     if (!project) return;
     const ids = project.rounds.map((r) => r.id);
@@ -219,8 +223,8 @@ export function PickerConstructor({
       const body = { bgArtId: res.artId };
       await (m.roundId ? patchRound(m.roundId, body) : patchProject(body));
     } else if (m.kind === "music") {
-      const body = { bgMusicArtId: res.artId };
-      await (m.roundId ? patchRound(m.roundId, body) : patchProject(body));
+      if (m.roundId) await patchRound(m.roundId, { bgMusicArtId: res.artId });
+      else await savePlaylist([...(project?.playlist ?? []).map((a) => a.id), res.artId]);
     } else if (m.kind === "tile") {
       const ok = await call(`/api/rounds/${m.roundId}/tiles`, "POST", { artId: res.artId });
       if (ok && res.crop) {
@@ -339,19 +343,71 @@ export function PickerConstructor({
             />
           </div>
           <div>
-            <label>Фоновая музыка (аудио из пула)</label>
-            <MediaChip
-              art={project.bgMusicArt}
-              placeholder="Выбрать музыку"
-              onPick={() => setModal({ kind: "music", roundId: null })}
-              onClear={() => void patchProject({ bgMusicArtId: null })}
-            />
+            <label>Фоновая музыка — плейлист (играет сквозь всё видео, лупится)</label>
+            {project.playlist.length === 0 ? (
+              <p className="muted" style={{ fontSize: 13, margin: "2px 0 6px" }}>
+                Плейлист пуст — раунды идут без фоновой музыки.
+              </p>
+            ) : (
+              project.playlist.map((a, i) => (
+                <div className="row" key={`${a.id}-${i}`} style={{ gap: 6, marginBottom: 4, alignItems: "center" }}>
+                  <span style={{ fontSize: 14, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {i + 1}. 🎵 {a.label ?? "без названия"}
+                    {a.durationSec ? <span className="muted"> · {fmtDur(a.durationSec)}</span> : null}
+                  </span>
+                  <button
+                    className="btn ghost"
+                    title="Выше"
+                    disabled={i === 0}
+                    onClick={() => {
+                      const ids = project.playlist.map((x) => x.id);
+                      [ids[i - 1], ids[i]] = [ids[i], ids[i - 1]];
+                      void savePlaylist(ids);
+                    }}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    className="btn ghost"
+                    title="Ниже"
+                    disabled={i === project.playlist.length - 1}
+                    onClick={() => {
+                      const ids = project.playlist.map((x) => x.id);
+                      [ids[i], ids[i + 1]] = [ids[i + 1], ids[i]];
+                      void savePlaylist(ids);
+                    }}
+                  >
+                    ↓
+                  </button>
+                  <button
+                    className="btn ghost"
+                    title="Убрать из плейлиста"
+                    onClick={() =>
+                      void savePlaylist(
+                        project.playlist.filter((_, j) => j !== i).map((x) => x.id),
+                      )
+                    }
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))
+            )}
+            <button
+              className="btn secondary"
+              onClick={() => setModal({ kind: "music", roundId: null })}
+            >
+              ➕ Трек в плейлист
+            </button>
           </div>
         </div>
         <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>
           Эти значения — дефолты для всех раундов; каждый раунд может их
-          переопределить. Видео-блок со звуком играет свой звук во время показа,
-          фоновая музыка на это время приглушается.
+          переопределить. Плейлист играет непрерывно через все раунды (треки
+          сменяются кроссфейдом, по окончании — луп); видео-блок со звуком
+          играет свой звук во время показа, музыка на это время приглушается.
+          Если у раунда задана своя музыка — на нём играет она, а плейлист
+          продолжается со следующего раунда.
         </p>
         <button
           className="btn secondary"

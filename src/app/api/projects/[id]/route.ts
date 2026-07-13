@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { userOr401, badRequest, notFound } from "@/lib/api";
-import { getProject, patchProject, deleteProject, type LoadedProject } from "@/server/projects";
+import {
+  getProject,
+  patchProject,
+  deleteProject,
+  effectivePlaylist,
+  type LoadedProject,
+} from "@/server/projects";
 import { buildPickerPreviewPlan, invalidRounds } from "@/server/picker-render";
 
 const ERRORS: Record<string, string> = {
@@ -35,6 +41,8 @@ function serialize(p: LoadedProject) {
     tickSound: p.tickSound,
     bgArt: artDto(p.bgArt),
     bgMusicArt: artDto(p.bgMusicArt),
+    // effective playlist (legacy single bgMusicArt shows up as one item)
+    playlist: effectivePlaylist(p).map((a) => artDto(a)),
     rounds: p.rounds.map((r) => ({
       id: r.id,
       order: r.order,

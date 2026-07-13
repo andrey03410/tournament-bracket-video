@@ -15,6 +15,7 @@ import { artCropStyle } from "@/lib/domain/art-crop";
 import {
   ROUND_GAP_SEC,
   type PickerPlan,
+  type PlanMusic,
   type PlanRound,
   type PlanTile,
 } from "@/lib/domain/picker-plan";
@@ -236,6 +237,51 @@ const Timer: React.FC<{ timerSec: number }> = ({ timerSec }) => {
   );
 };
 
+/**
+ * Continuous background playlist: cues laid over the WHOLE video with
+ * crossfade overlaps; silent during rounds that carry their own music,
+ * ducked under tile sounds elsewhere.
+ */
+const PlaylistAudio: React.FC<{ music: PlanMusic; mode: AssetMode }> = ({
+  music,
+  mode,
+}) => {
+  const { fps } = useVideoConfig();
+  return (
+    <>
+      {music.cues.map((cue, i) => {
+        const src = resolve(mode, cue.ref);
+        if (!src) return null;
+        const durFrames = Math.max(1, sec(cue.durationSec, fps));
+        return (
+          <Sequence key={`cue-${i}`} from={sec(cue.fromSec, fps)} durationInFrames={durFrames}>
+            <Audio
+              src={src}
+              volume={(f) => {
+                const t = cue.fromSec + f / fps; // absolute video time
+                if (music.muteWindows.some((w) => t >= w.fromSec && t < w.toSec)) return 0;
+                const envelope = interpolate(
+                  f,
+                  [
+                    0,
+                    cue.fadeInSec * fps,
+                    Math.max(cue.fadeInSec * fps + 1, durFrames - cue.fadeOutSec * fps),
+                    durFrames,
+                  ],
+                  [0, 1, 1, 0],
+                  { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+                );
+                const ducked = music.duckWindows.some((w) => t >= w.fromSec && t < w.toSec);
+                return envelope * (ducked ? 0.15 : 0.9);
+              }}
+            />
+          </Sequence>
+        );
+      })}
+    </>
+  );
+};
+
 const RoundView: React.FC<{
   round: PlanRound;
   mode: AssetMode;
@@ -392,6 +438,7 @@ export const PickerVideo: React.FC<PickerVideoProps> = ({ plan, assetMode, tickS
   const { fps } = useVideoConfig();
   return (
     <AbsoluteFill style={{ backgroundColor: BG }}>
+      {plan.music ? <PlaylistAudio music={plan.music} mode={assetMode} /> : null}
       {plan.rounds.map((round) => (
         <Sequence
           key={round.index}

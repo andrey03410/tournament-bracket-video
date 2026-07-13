@@ -25,6 +25,7 @@ import {
   reorderTopItems,
 } from "@/server/projects";
 import { buildPickerPreviewPlan, invalidRounds } from "@/server/picker-render";
+import { effectivePlaylist, setPlaylist } from "@/server/projects";
 import { buildPreviewPlan, getProjectRenderConfig } from "@/server/render";
 
 // Integration tests for phase 6 (video projects): picker CRUD + preview plan,
@@ -300,6 +301,62 @@ describe("manual top", () => {
     await expect(addTopItem(userId, picker.id, audioArtId)).rejects.toThrow("NOT_TOP");
     await deleteProject(userId, top.id);
     await deleteProject(userId, picker.id);
+  });
+});
+
+describe("background-music playlist", () => {
+  it("legacy bgMusicArtId acts as a one-track playlist until a real one is saved", async () => {
+    const p = await createProject(userId, "Плейлист-legacy", "picker");
+    await patchProject(userId, p.id, { bgMusicArtId: audioArtId });
+    let loaded = await getProject(userId, p.id);
+    expect(effectivePlaylist(loaded!).map((a) => a.id)).toEqual([audioArtId]);
+
+    // saving an explicit playlist clears the legacy field
+    await setPlaylist(userId, p.id, [audioArtId, audioArtId]);
+    loaded = await getProject(userId, p.id);
+    expect(loaded!.bgMusicArtId).toBeNull();
+    expect(effectivePlaylist(loaded!).map((a) => a.id)).toEqual([audioArtId, audioArtId]);
+    await deleteProject(userId, p.id);
+  });
+
+  it("rejects non-audio tracks and wrong project kinds", async () => {
+    const p = await createProject(userId, "Плейлист-валид", "picker");
+    await expect(setPlaylist(userId, p.id, [imageArtId])).rejects.toThrow("BAD_MUSIC");
+    await expect(setPlaylist(userId, p.id, [silentVideoArtId])).rejects.toThrow("BAD_MUSIC");
+    await expect(setPlaylist(otherUserId, p.id, [audioArtId])).rejects.toThrow("NOT_FOUND");
+    const top = await createProject(userId, "Топ", "top");
+    await expect(setPlaylist(userId, top.id, [audioArtId])).rejects.toThrow("NOT_PICKER");
+    await deleteProject(userId, p.id);
+    await deleteProject(userId, top.id);
+  });
+
+  it("preview plan carries continuous music cues, mute windows and global ducks", async () => {
+    const p = await createProject(userId, "Плейлист-план", "picker");
+    await patchProject(userId, p.id, { revealSec: 2, timerSec: 3 });
+    await setPlaylist(userId, p.id, [audioArtId]); // 3s track -> loops
+    const r1 = (await getProject(userId, p.id))!.rounds[0];
+    await addTile(userId, r1.id, videoArtId); // sounded tile -> duck window
+    await addTile(userId, r1.id, imageArtId);
+    const r2 = await addRound(userId, p.id);
+    await patchRound(userId, r2.id, { bgMusicArtId: audioArtId }); // override round
+    await addTile(userId, r2.id, imageArtId);
+    await addTile(userId, r2.id, imageArtId);
+
+    const plan = buildPickerPreviewPlan((await getProject(userId, p.id))!);
+    expect(plan.music).not.toBeNull();
+    const music = plan.music!;
+    // cues cover the whole video, looping the 3s track with crossfades
+    expect(music.cues.length).toBeGreaterThan(2);
+    const last = music.cues[music.cues.length - 1];
+    expect(last.fromSec + last.durationSec).toBeGreaterThanOrEqual(plan.durationSec);
+    expect(music.cues.every((c) => c.ref === `/api/arts/${audioArtId}`)).toBe(true);
+    // the override round mutes the playlist for exactly its span
+    const round2 = plan.rounds[1];
+    expect(music.muteWindows).toEqual([{ fromSec: round2.startSec, toSec: round2.endSec }]);
+    // global ducks come only from the non-override round
+    expect(music.duckWindows).toEqual(plan.rounds[0].duckWindows);
+    expect(music.duckWindows).toHaveLength(1);
+    await deleteProject(userId, p.id);
   });
 });
 

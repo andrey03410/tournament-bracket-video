@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   buildPickerPlan,
+  buildMusicCues,
   ANSWER_SEC,
+  MUSIC_FADE_SEC,
   PROMPT_INTRO_SEC,
   NO_PROMPT_INTRO_SEC,
   ROUND_GAP_SEC,
@@ -194,5 +196,66 @@ describe("buildPickerPlan labels", () => {
       round([imageTile({ label: "  " }), imageTile()]),
     ]);
     expect(plan.rounds[0].tiles[0].label).toBeNull();
+  });
+});
+
+describe("buildMusicCues / plan.music", () => {
+  const track = (ref: string, durationSec: number) => ({ ref, durationSec });
+
+  it("lays tracks back to back with a crossfade overlap and loops to cover the video", () => {
+    const cues = buildMusicCues([track("a.mp3", 10), track("b.mp3", 6)], 25);
+    expect(cues.map((c) => c.ref)).toEqual(["a.mp3", "b.mp3", "a.mp3", "b.mp3"]);
+    // each next cue starts one fade before the previous ends (overlap)
+    expect(cues[1].fromSec).toBeCloseTo(10 - MUSIC_FADE_SEC, 9);
+    expect(cues[2].fromSec).toBeCloseTo(9 + 6 - MUSIC_FADE_SEC, 9);
+    // coverage reaches the end of the video
+    const last = cues[cues.length - 1];
+    expect(last.fromSec + last.durationSec).toBeGreaterThanOrEqual(25);
+  });
+
+  it("a single short track loops with crossfades", () => {
+    const cues = buildMusicCues([track("a.mp3", 4)], 10);
+    expect(cues.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(cues.map((c) => c.ref))).toEqual(new Set(["a.mp3"]));
+  });
+
+  it("last cue is clipped to the video end (plus the fade allowance)", () => {
+    const cues = buildMusicCues([track("a.mp3", 100)], 20);
+    expect(cues).toHaveLength(1);
+    expect(cues[0].durationSec).toBeCloseTo(20 + MUSIC_FADE_SEC, 9);
+  });
+
+  it("empty or unusable playlists produce no cues", () => {
+    expect(buildMusicCues([], 20)).toEqual([]);
+    expect(buildMusicCues([track("a.mp3", 0)], 20)).toEqual([]);
+  });
+
+  it("plan.music: override rounds become mute windows; their ducks are excluded", () => {
+    const plan = buildPickerPlan(
+      DEFAULTS,
+      [
+        round([videoTile(30), imageTile()]), // playlist round with a sounded tile
+        round([videoTile(30), imageTile()], {
+          bgMusic: { ref: "own.mp3", durationSec: 60 }, // override round
+        }),
+      ],
+      [track("pl.mp3", 60)],
+    );
+    const [r1, r2] = plan.rounds;
+    expect(plan.music).not.toBeNull();
+    expect(plan.music!.muteWindows).toEqual([{ fromSec: r2.startSec, toSec: r2.endSec }]);
+    // playlist ducks only under the non-override round's tile sound
+    expect(plan.music!.duckWindows).toEqual(r1.duckWindows);
+    expect(plan.music!.duckWindows).toHaveLength(1);
+    // the override round still carries its own duck windows
+    expect(r2.bgMusic!.duckWindows).toHaveLength(1);
+    // cues cover the whole two-round video
+    const last = plan.music!.cues[plan.music!.cues.length - 1];
+    expect(last.fromSec + last.durationSec).toBeGreaterThanOrEqual(plan.durationSec);
+  });
+
+  it("no playlist -> plan.music is null", () => {
+    const plan = buildPickerPlan(DEFAULTS, [round([imageTile(), imageTile()])]);
+    expect(plan.music).toBeNull();
   });
 });

@@ -50,6 +50,10 @@ export async function listProjects(userId: string) {
 const PROJECT_INCLUDE = {
   bgArt: true,
   bgMusicArt: true,
+  playlist: {
+    orderBy: { order: "asc" as const },
+    include: { art: true },
+  },
   rounds: {
     orderBy: { order: "asc" as const },
     include: {
@@ -147,6 +151,40 @@ export async function deleteProject(userId: string, id: string) {
     await removePath(path.join("renders", "tmp", job.id));
   }
   await prisma.videoProject.delete({ where: { id } });
+}
+
+/**
+ * Effective background playlist: explicit items, or the legacy single
+ * bgMusicArtId as a one-track playlist until the user saves a real one.
+ */
+export function effectivePlaylist(project: LoadedProject) {
+  if (project.playlist.length > 0) return project.playlist.map((p) => p.art);
+  return project.bgMusicArt ? [project.bgMusicArt] : [];
+}
+
+/** Replace the whole playlist (ordered audio art ids); clears the legacy field. */
+export async function setPlaylist(userId: string, projectId: string, artIds: string[]) {
+  const project = await ownedProject(userId, projectId);
+  if (project.kind !== "picker") throw new Error("NOT_PICKER");
+  if (artIds.length > 50) throw new Error("TOO_MANY_TRACKS");
+
+  const arts = await prisma.art.findMany({ where: { id: { in: artIds }, userId } });
+  const byId = new Map(arts.map((a) => [a.id, a]));
+  for (const id of artIds) {
+    const art = byId.get(id);
+    if (!art || art.kind !== "audio" || !art.hasAudio) throw new Error("BAD_MUSIC");
+  }
+
+  await prisma.$transaction([
+    prisma.pickerPlaylistItem.deleteMany({ where: { projectId } }),
+    ...artIds.map((artId, i) =>
+      prisma.pickerPlaylistItem.create({ data: { projectId, artId, order: i } }),
+    ),
+    prisma.videoProject.update({
+      where: { id: projectId },
+      data: { bgMusicArtId: null, updatedAt: new Date() },
+    }),
+  ]);
 }
 
 // ---- Picker rounds ----

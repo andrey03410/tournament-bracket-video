@@ -111,8 +111,21 @@ model VideoProject {
   bgMusicArt      Art?    @relation("ProjectBgMusic", fields: [bgMusicArtId], references: [id], onDelete: SetNull)
 
   rounds       PickerRound[]
+  playlist     PickerPlaylistItem[]
   renderConfig RenderConfig?
   renderJobs   RenderJob[]
+}
+
+// Ordered background-music playlist of a picker project: plays through the
+// whole video with crossfades, looping when exhausted. Rounds with their own
+// bgMusicArtId mute it for their duration (the timeline keeps running).
+model PickerPlaylistItem {
+  id        String       @id @default(cuid())
+  projectId String
+  project   VideoProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  order     Int
+  artId     String
+  art       Art          @relation("PlaylistArt", fields: [artId], references: [id], onDelete: Cascade)
 }
 
 model PickerRound {
@@ -184,6 +197,7 @@ model Art {
   projectMusics    VideoProject[] @relation("ProjectBgMusic")
   roundBgs         PickerRound[]  @relation("RoundBg")
   roundMusics      PickerRound[]  @relation("RoundBgMusic")
+  playlistItems    PickerPlaylistItem[] @relation("PlaylistArt")
 }
 
 model RenderConfig {

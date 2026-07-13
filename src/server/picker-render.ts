@@ -14,7 +14,7 @@ import {
   type PlanTileInput,
 } from "@/lib/domain/picker-plan";
 import { describeRenderError } from "@/server/render";
-import type { LoadedProject } from "@/server/projects";
+import { effectivePlaylist, type LoadedProject } from "@/server/projects";
 
 // Picker preview plan + headless render pipeline (mirrors render.ts for tops).
 
@@ -95,7 +95,11 @@ export function buildPickerPreviewPlan(project: LoadedProject) {
       })),
     };
   });
-  return buildPickerPlan(defaults(project), rounds);
+  const playlist = effectivePlaylist(project).map((a) => ({
+    ref: `/api/arts/${a.id}`,
+    durationSec: a.durationSec,
+  }));
+  return buildPickerPlan(defaults(project), rounds, playlist);
 }
 
 /** Rounds must have 2..9 tiles to be renderable; returns 1-based bad indexes. */
@@ -145,6 +149,7 @@ async function runPickerRender(jobId: string): Promise<void> {
     include: {
       bgArt: true,
       bgMusicArt: true,
+      playlist: { orderBy: { order: "asc" }, include: { art: true } },
       rounds: {
         orderBy: { order: "asc" },
         include: {
@@ -277,7 +282,32 @@ async function runPickerRender(jobId: string): Promise<void> {
     });
   }
 
-  const plan = buildPickerPlan(defaults(project as LoadedProject), roundInputs);
+  // Playlist: each unique track transcoded once (near-zero edge fades only —
+  // the composition's crossfade envelope does the real fading).
+  const playlistArts = effectivePlaylist(project as LoadedProject);
+  const playlistTracks = [];
+  const prepared = new Map<string, string>();
+  for (const art of playlistArts) {
+    let base = prepared.get(art.id);
+    if (!base) {
+      base = `pl-${art.id}.aac`;
+      await clipAudio(
+        absPath(art.filePath),
+        0,
+        art.durationSec ?? 600,
+        path.join(publicDir, base),
+        0.05,
+      );
+      prepared.set(art.id, base);
+    }
+    playlistTracks.push({ ref: base, durationSec: art.durationSec });
+  }
+
+  const plan = buildPickerPlan(
+    defaults(project as LoadedProject),
+    roundInputs,
+    playlistTracks,
+  );
   // Swap each sounded tile's audio ref to its pre-clipped AAC.
   for (const r of plan.rounds) {
     for (const t of r.tiles) {
