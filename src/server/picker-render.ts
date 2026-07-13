@@ -13,6 +13,7 @@ import {
   type PlanRoundInput,
   type PlanTileInput,
 } from "@/lib/domain/picker-plan";
+import { describeRenderError } from "@/server/render";
 import type { LoadedProject } from "@/server/projects";
 
 // Picker preview plan + headless render pipeline (mirrors render.ts for tops).
@@ -121,7 +122,7 @@ export async function startPickerRenderJob(userId: string, projectId: string) {
   void runPickerRender(job.id).catch(async (err) => {
     await prisma.renderJob.update({
       where: { id: job.id },
-      data: { status: "failed", error: String((err as Error)?.message ?? err) },
+      data: { status: "failed", error: describeRenderError(err) },
     });
   });
   return job.id;
@@ -218,7 +219,14 @@ async function runPickerRender(jobId: string): Promise<void> {
           art.durationSec != null ? Math.max(0.2, art.durationSec - effStart) : revealSec;
         const cutLen = Math.min(revealSec, avail);
         const base = `${key}.mp4`;
-        await clipVideo(absPath(art.filePath), effStart, cutLen, path.join(publicDir, base));
+        // Cut with tail headroom where the source allows: a straight-through tile
+        // must never seek past the re-encoded file's real EOF (black flash).
+        await clipVideo(
+          absPath(art.filePath),
+          effStart,
+          Math.min(avail, cutLen + 0.5),
+          path.join(publicDir, base),
+        );
 
         let posterRef: string | null = null;
         if (art.posterPath) {

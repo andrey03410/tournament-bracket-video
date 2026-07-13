@@ -49,7 +49,9 @@ const Backdrop: React.FC<{
       {bg && src ? (
         bg.kind === "video" ? (
           <Loop
-            durationInFrames={Math.max(1, Math.round((bg.durationSec ?? 60) * 30))}
+            // container duration >= real stream length; overshooting by even a
+            // frame flashes black on EVERY loop of the backdrop
+            durationInFrames={Math.max(1, Math.floor((bg.durationSec ?? 60) * 30) - 1)}
           >
             <OffthreadVideo muted src={src} style={cover} />
           </Loop>
@@ -77,8 +79,12 @@ const TileMedia: React.FC<{ tile: PlanTile; mode: AssetMode }> = ({ tile, mode }
         style={artCropStyle(tile.visual.crop)}
       />
     );
+    // One frame short of the footage length: seeking past the real EOF of a
+    // re-encoded clip flashes black at every loop boundary.
     return tile.visual.loopSec != null ? (
-      <Loop durationInFrames={Math.max(1, sec(tile.visual.loopSec, fps))}>{video}</Loop>
+      <Loop durationInFrames={Math.max(1, Math.floor(tile.visual.loopSec * fps) - 1)}>
+        {video}
+      </Loop>
     ) : (
       video
     );

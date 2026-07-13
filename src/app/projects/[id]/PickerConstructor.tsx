@@ -11,6 +11,7 @@ import {
   type GalleryKind,
   type PickResult,
 } from "@/app/tournaments/[id]/render/ArtGalleryModal";
+import { FragmentPreview } from "@/app/components/FragmentPreview";
 
 const PlayerComp = PickerVideo as unknown as React.FC<Record<string, unknown>>;
 
@@ -120,6 +121,7 @@ export function PickerConstructor({
   const [plan, setPlan] = useState<PickerPlan | null>(null);
   const [tickUrl, setTickUrl] = useState<string | null>(null);
   const [modal, setModal] = useState<ModalState>(null);
+  const [previewTileId, setPreviewTileId] = useState<string | null>(null);
   const [job, setJob] = useState<JobDto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -549,34 +551,55 @@ export function PickerConstructor({
                   </button>
                 </div>
                 {tile.art?.kind === "video" ? (
-                  <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                    {tile.art.hasAudio ? (
-                      <label className="row" style={{ gap: 5, fontSize: 13 }}>
-                        <input
-                          type="checkbox"
-                          checked={tile.playSound}
-                          onChange={(e) => void patchTile(tile.id, { playSound: e.target.checked })}
-                        />
-                        <span>звук</span>
-                      </label>
-                    ) : (
-                      <span className="muted" style={{ fontSize: 12 }}>без звука</span>
-                    )}
-                    <input
-                      type="number"
-                      min={0}
-                      step={0.5}
-                      title="Старт видеоряда (сек)"
-                      placeholder="старт, с"
-                      style={{ width: 90, marginBottom: 0 }}
-                      defaultValue={tile.startSec ?? ""}
-                      onBlur={(e) =>
-                        void patchTile(tile.id, {
-                          startSec: e.target.value === "" ? null : Number(e.target.value),
-                        })
-                      }
-                    />
-                  </div>
+                  <>
+                    <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      {tile.art.hasAudio ? (
+                        <label className="row" style={{ gap: 5, fontSize: 13 }}>
+                          <input
+                            type="checkbox"
+                            checked={tile.playSound}
+                            onChange={(e) => void patchTile(tile.id, { playSound: e.target.checked })}
+                          />
+                          <span>звук</span>
+                        </label>
+                      ) : (
+                        <span className="muted" style={{ fontSize: 12 }}>без звука</span>
+                      )}
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.5}
+                        title="Старт видеоряда (сек)"
+                        placeholder="старт, с"
+                        style={{ width: 90, marginBottom: 0 }}
+                        key={`ss-${tile.id}-${tile.startSec}`}
+                        defaultValue={tile.startSec ?? ""}
+                        onBlur={(e) =>
+                          void patchTile(tile.id, {
+                            startSec: e.target.value === "" ? null : Number(e.target.value),
+                          })
+                        }
+                      />
+                      <button
+                        className="btn ghost"
+                        title="Подобрать старт по видео"
+                        onClick={() =>
+                          setPreviewTileId(previewTileId === tile.id ? null : tile.id)
+                        }
+                      >
+                        🎧
+                      </button>
+                    </div>
+                    {previewTileId === tile.id ? (
+                      <FragmentPreview
+                        src={tile.art.url}
+                        kind="video"
+                        fragmentStartSec={tile.startSec ?? 0}
+                        fragmentLenSec={round.revealSec ?? project.revealSec}
+                        onSetStart={(sec) => void patchTile(tile.id, { startSec: sec })}
+                      />
+                    ) : null}
+                  </>
                 ) : null}
               </div>
             ))}

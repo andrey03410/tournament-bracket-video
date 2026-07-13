@@ -131,7 +131,9 @@ export async function clipAudio(
   outputPath: string,
   fadeSec = 1,
 ): Promise<void> {
-  const outFadeStart = Math.max(0, durationSec - fadeSec);
+  // The fade-out is anchored to the REAL end of the clipped stream (reverse ->
+  // fade-in -> reverse): probed durations (VBR mp3) overestimate, and a fade
+  // scheduled past EOF silently does nothing -> abrupt cut at the segment end.
   await run([
     "-y",
     "-ss",
@@ -141,7 +143,7 @@ export async function clipAudio(
     "-i",
     inputPath,
     "-af",
-    `afade=t=in:st=0:d=${fadeSec},afade=t=out:st=${outFadeStart}:d=${fadeSec}`,
+    `afade=t=in:st=0:d=${fadeSec},areverse,afade=t=in:st=0:d=${fadeSec},areverse`,
     "-ac",
     "2",
     outputPath,

@@ -262,6 +262,22 @@ export async function startProjectRenderJob(userId: string, projectId: string) {
   return queueTopRender({ projectId });
 }
 
+/**
+ * Human-readable job error; browser-launch failures get an actionable hint
+ * (the raw Remotion message is cryptic for users).
+ */
+export function describeRenderError(err: unknown): string {
+  const msg = String((err as Error)?.message ?? err);
+  if (/browser|chrome|chromium|executable|headless/i.test(msg)) {
+    return (
+      msg +
+      " — похоже, не найден браузер для рендера: проверьте путь в " +
+      "REMOTION_BROWSER_EXECUTABLE в .env (подробности в README, раздел «Рендер видео»)"
+    );
+  }
+  return msg;
+}
+
 async function queueTopRender(owner: { tournamentId?: string; projectId?: string }) {
   const job = await prisma.renderJob.create({
     data: { ...owner, status: "queued", progress: 0 },
@@ -270,7 +286,7 @@ async function queueTopRender(owner: { tournamentId?: string; projectId?: string
   void runRender(job.id).catch(async (err) => {
     await prisma.renderJob.update({
       where: { id: job.id },
-      data: { status: "failed", error: String(err?.message ?? err) },
+      data: { status: "failed", error: describeRenderError(err) },
     });
   });
   return job.id;
@@ -374,7 +390,10 @@ async function runRender(jobId: string): Promise<void> {
         // audio window; a visual-only video plays from its own offset and loops.
         const synced = it.art ? s.audioFromMedia : true;
         if (synced) {
-          await clipVideo(footageAbs, start, clipSec, path.join(publicDir, visualBase));
+          // +0.5s tail headroom (source permitting): the re-encode may come out
+          // a hair shorter than requested, and playing past its EOF flashes black
+          // on the segment's last frames.
+          await clipVideo(footageAbs, start, clipSec + 0.5, path.join(publicDir, visualBase));
           visual = {
             kind: "video",
             ref: visualBase,

@@ -6,6 +6,7 @@ import { TopVideo } from "@/remotion/TopVideo";
 import type { VideoPlan } from "@/lib/domain/video-plan";
 import { artCropStyle, type ArtCrop } from "@/lib/domain/art-crop";
 import { ArtGalleryModal, type PickResult } from "./ArtGalleryModal";
+import { FragmentPreview } from "@/app/components/FragmentPreview";
 
 // Remotion's Player generic is constrained to Record<string, unknown>; bridge our
 // fixed-shape props at this boundary.
@@ -130,6 +131,7 @@ export function RenderConstructor({
   const [config, setConfig] = useState<ConfigDto | null>(null);
   const [plan, setPlan] = useState<VideoPlan | null>(null);
   const [modal, setModal] = useState<ModalState>(null);
+  const [previewId, setPreviewId] = useState<string | null>(null);
   const [job, setJob] = useState<JobDto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -406,6 +408,7 @@ export function RenderConstructor({
                   <input
                     type="number"
                     min={0}
+                    key={`start-${it.id}-${it.clipStartSec}`}
                     defaultValue={it.clipStartSec ?? 0}
                     onBlur={(e) => patchItem(it.id, { clipStartSec: Number(e.target.value) })}
                   />
@@ -415,6 +418,7 @@ export function RenderConstructor({
                   <input
                     type="number"
                     min={0}
+                    key={`end-${it.id}-${it.clipEndSec}`}
                     defaultValue={it.clipEndSec ?? 30}
                     onBlur={(e) => patchItem(it.id, { clipEndSec: Number(e.target.value) })}
                   />
@@ -448,6 +452,59 @@ export function RenderConstructor({
                 </p>
               </div>
             )}
+
+            {(() => {
+              const fromMedia = it.audioSource === "media" && it.art?.hasAudio;
+              const srcUrl = fromMedia ? it.artUrl! : it.audioUrl;
+              const srcKind: "audio" | "video" =
+                (fromMedia ? it.art!.kind === "video" : it.trackKind === "video")
+                  ? "video"
+                  : "audio";
+              const fragStart =
+                it.clipMode === "manual"
+                  ? (it.clipStartSec ?? 0)
+                  : it.clipMode === "active_snippet"
+                    ? (it.resolvedStartSec ?? 0)
+                    : 0;
+              const fragLen =
+                it.clipMode === "manual"
+                  ? Math.max(1, (it.clipEndSec ?? 30) - (it.clipStartSec ?? 0))
+                  : it.clipMode === "full"
+                    ? (it.durationSec ?? config.defaultClipSec)
+                    : (it.snippetLenSec ?? config.defaultClipSec);
+              return (
+                <div style={{ marginTop: 8 }}>
+                  <button
+                    className="btn ghost"
+                    type="button"
+                    onClick={() => setPreviewId(previewId === it.id ? null : it.id)}
+                  >
+                    {previewId === it.id ? "▾ Скрыть прослушивание" : "🎧 Подобрать фрагмент"}
+                  </button>
+                  {previewId === it.id ? (
+                    <div style={{ marginTop: 8, maxWidth: 560 }}>
+                      <FragmentPreview
+                        src={srcUrl}
+                        kind={srcKind}
+                        fragmentStartSec={fragStart}
+                        fragmentLenSec={fragLen}
+                        onSetStart={(sec) =>
+                          void patchItem(it.id, {
+                            clipMode: "manual",
+                            clipStartSec: sec,
+                            clipEndSec: sec + fragLen,
+                          })
+                        }
+                      />
+                      <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                        «Старт отсюда» переключает фрагмент на ручной режим и
+                        ставит начало в текущую позицию плеера.
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })()}
 
             <label>Визуал</label>
             <div className="row" style={{ gap: 12, alignItems: "center" }}>

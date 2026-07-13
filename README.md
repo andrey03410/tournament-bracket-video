@@ -26,6 +26,20 @@
 - **ffmpeg-static** — декод/нарезка аудио, RMS-анализ активного сниппета.
 - **Vitest** — тесты.
 
+## Требования
+
+Перед запуском должны быть установлены:
+
+| Что                         | Зачем                                   | Как проверить            |
+|-----------------------------|------------------------------------------|--------------------------|
+| **Node.js ≥ 18.17** (лучше 20 LTS) | Next.js 14 и весь бэкенд          | `node -v`                |
+| **npm** (идёт с Node)       | установка зависимостей                   | `npm -v`                 |
+| **Google Chrome / Chromium** | только для **рендера MP4** (Remotion)   | `google-chrome --version` |
+
+Ставить отдельно **не нужно**: ffmpeg (идёт в комплекте — пакет
+`ffmpeg-static`), SQLite (встроен в Prisma), Remotion/React/Prisma и прочее —
+всё приходит через `npm install`.
+
 ## Быстрый старт
 
 ```bash
@@ -39,13 +53,19 @@ npm run dev                   # http://localhost:3000
 `ADMIN_EMAILS` — email-ы (через запятую), которые автоматически получают роль
 администратора при входе/регистрации.
 
-Для рендера видео (один раз, в окружении с доступом в сеть):
+### Браузер для рендера (важно)
 
-```bash
-npx remotion browser ensure   # скачивает chrome-headless-shell
-# или укажите путь к chrome-headless-shell:
-# REMOTION_BROWSER_EXECUTABLE=/path/to/chrome-headless-shell
-```
+Рендер MP4 выполняется Remotion-ом в headless-браузере. Какой браузер
+использовать, задаёт переменная **`REMOTION_BROWSER_EXECUTABLE`** в `.env`:
+
+- Укажите путь к установленному Chrome/Chromium — например,
+  `/usr/bin/google-chrome` (Linux), `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` (macOS).
+- Если переменная **не задана**, Remotion попытается **скачать из интернета**
+  свой chrome-headless-shell; в окружении без сети рендер упадёт с ошибкой
+  вида «could not download / no browser executable». Скачивание можно сделать
+  заранее: `npx remotion browser ensure`.
+- Всё остальное (сравнения, конструкторы, живое превью) работает **без**
+  браузера — он нужен только кнопке «🎬 Рендерить видео».
 
 ## Роли
 

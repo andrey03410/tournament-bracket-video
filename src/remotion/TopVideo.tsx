@@ -70,8 +70,12 @@ const VisualView: React.FC<{ visual: SegmentVisual; rank: number; mode: AssetMod
         style={artCropStyle(visual.crop)}
       />
     );
+    // One frame short of the footage length: probed/re-encoded durations may
+    // overshoot the real frame count, and seeking past EOF flashes black.
     return visual.loopSec != null ? (
-      <Loop durationInFrames={Math.max(1, Math.round(visual.loopSec * fps))}>{video}</Loop>
+      <Loop durationInFrames={Math.max(1, Math.floor(visual.loopSec * fps) - 1)}>
+        {video}
+      </Loop>
     ) : (
       video
     );
@@ -126,7 +130,24 @@ const SegmentView: React.FC<{ seg: PlanSegment; mode: AssetMode }> = ({ seg, mod
   return (
     <AbsoluteFill style={{ backgroundColor: BG, fontFamily: FONT }}>
       {audio ? (
-        <Audio src={audio} startFrom={startFrom} endAt={startFrom + seg.durationFrames} />
+        <Audio
+          src={audio}
+          startFrom={startFrom}
+          endAt={startFrom + seg.durationFrames}
+          // In preview the audio is the raw source (no pre-clip fades), so the
+          // envelope lives here; rendered clips are already faded by ffmpeg.
+          volume={
+            mode === "url"
+              ? (f) =>
+                  interpolate(
+                    f,
+                    [0, 0.3 * fps, seg.durationFrames - fade, seg.durationFrames],
+                    [0, 1, 1, 0],
+                    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+                  )
+              : undefined
+          }
+        />
       ) : null}
 
       {/* Visual fills the whole frame as a background; per-position crop maps the
