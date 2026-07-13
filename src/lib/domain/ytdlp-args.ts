@@ -37,6 +37,8 @@ export interface DownloadArgsInput {
   ffmpegPath: string;
   /** Hard cap; null = unlimited. */
   maxBytes: number | null;
+  /** http(s)/socks5 proxy for the media fetch (YTDLP_PROXY); null = direct. */
+  proxy?: string | null;
 }
 
 export function buildDownloadArgs(input: DownloadArgsInput): string[] {
@@ -69,6 +71,7 @@ export function buildDownloadArgs(input: DownloadArgsInput): string[] {
     input.markerFile,
   ];
   if (input.maxBytes != null) base.push("--max-filesize", String(input.maxBytes));
+  if (input.proxy) base.push("--proxy", input.proxy);
   base.push("--", input.url);
   return base;
 }
@@ -190,7 +193,11 @@ export function describeDownloadError(stderr: string): string {
     return "Видео недоступно (удалено, приватное или с ограничением доступа)";
   }
   if (/handshake operation timed out|Connection (?:refused|reset)|timed out|Unable to connect/i.test(last)) {
-    return "Сеть сервера не дотянулась до видео-CDN (таймаут) — проверьте доступ к googlevideo.com или попробуйте позже";
+    return (
+      "Сеть сервера не дотянулась до видео-CDN (googlevideo.com заблокирован " +
+      "или недоступен). Если есть VPN/прокси — задайте его в YTDLP_PROXY в .env " +
+      "и перезапустите сервер"
+    );
   }
   return last.replace(/^ERROR:\s*/i, "").slice(0, 300);
 }

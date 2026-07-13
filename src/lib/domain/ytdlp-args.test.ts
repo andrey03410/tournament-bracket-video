@@ -56,6 +56,12 @@ describe("buildDownloadArgs", () => {
     expect(args).toContain("m4a");
     expect(args).not.toContain("--merge-output-format");
     expect(args).not.toContain("--max-filesize");
+    expect(args).not.toContain("--proxy");
+  });
+
+  it("proxy is passed through when configured", () => {
+    const args = buildDownloadArgs({ ...base, mode: "video", proxy: "socks5://127.0.0.1:1080" });
+    expect(args.join(" ")).toContain("--proxy socks5://127.0.0.1:1080");
   });
 });
 

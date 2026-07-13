@@ -91,6 +91,11 @@ function runCapture(
   });
 }
 
+/** Optional proxy for all yt-dlp traffic (VPN escape hatch for blocked CDNs). */
+function proxyEnv(): string | null {
+  return process.env.YTDLP_PROXY?.trim() || null;
+}
+
 /** Fetch metadata: title, duration, size estimate for the planned download. */
 export async function probeUrl(
   url: string,
@@ -98,9 +103,13 @@ export async function probeUrl(
   quality: number,
 ): Promise<ProbeResult> {
   const bin = await ensureYtDlp();
+  const proxy = proxyEnv();
   const { code, stdout, stderr } = await runCapture(bin, [
     "-J",
     "--no-playlist",
+    "--socket-timeout",
+    "15",
+    ...(proxy ? ["--proxy", proxy] : []),
     "--",
     url,
   ]);
@@ -142,6 +151,7 @@ export async function downloadMedia(opts: {
     markerFile,
     ffmpegPath: FFMPEG,
     maxBytes: opts.maxBytes,
+    proxy: proxyEnv(),
   });
 
   const { code, stdout, stderr } = await runCapture(
