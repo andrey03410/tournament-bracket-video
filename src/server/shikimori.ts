@@ -67,11 +67,19 @@ export interface ImportPosterInput {
   maxPoolBytes: number | null;
 }
 
+const EXT_BY_CONTENT_TYPE: Record<string, string> = {
+  "image/png": ".png",
+  "image/webp": ".webp",
+  "image/gif": ".gif",
+  "image/jpeg": ".jpg",
+};
+
 export async function importPoster(userId: string, input: ImportPosterInput): Promise<{ artId: string }> {
   if (!isSafeImagePath(input.posterPath)) throw new Error("BAD_IMAGE_PATH");
-  const { data } = await fetchPoster(input.posterPath); // may throw POSTER_FETCH_FAILED
+  const { data, contentType } = await fetchPoster(input.posterPath); // may throw POSTER_FETCH_FAILED
+  const ext = EXT_BY_CONTENT_TYPE[contentType] ?? ".jpg";
   const art = await createArt(userId, {
-    fileName: `shikimori-${input.type}-${input.id}.jpg`,
+    fileName: `shikimori-${input.type}-${input.id}${ext}`,
     data,
     label: input.label,
     maxPoolBytes: input.maxPoolBytes,

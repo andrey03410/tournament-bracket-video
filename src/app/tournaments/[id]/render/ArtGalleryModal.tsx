@@ -284,7 +284,7 @@ function ShikimoriPanel({ onPoolChange }: { onPoolChange: () => void }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [importingKey, setImportingKey] = useState<string | null>(null);
-  const [doneKey, setDoneKey] = useState<string | null>(null);
+  const [doneKeys, setDoneKeys] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     setError(null);
@@ -303,11 +303,11 @@ function ShikimoriPanel({ onPoolChange }: { onPoolChange: () => void }) {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "Ошибка поиска");
         setResults(data.results as ShkResult[]);
+        setLoading(false);
       } catch (e) {
         if ((e as Error).name === "AbortError") return;
         setError((e as Error).message);
         setResults([]);
-      } finally {
         setLoading(false);
       }
     }, 300);
@@ -330,7 +330,7 @@ function ShikimoriPanel({ onPoolChange }: { onPoolChange: () => void }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Не удалось импортировать");
-      setDoneKey(key);
+      setDoneKeys((prev) => new Set(prev).add(key));
       onPoolChange();
     } catch (e) {
       setError((e as Error).message);
@@ -375,7 +375,7 @@ function ShikimoriPanel({ onPoolChange }: { onPoolChange: () => void }) {
                 </span>
                 {r.facts ? <span className="muted" style={{ fontSize: 12 }}>{r.facts}</span> : null}
               </span>
-              {doneKey === `${r.type}-${r.id}` ? (
+              {doneKeys.has(`${r.type}-${r.id}`) ? (
                 <span style={{ fontSize: 12, color: "#7be29a" }}>в пуле</span>
               ) : (
                 <button

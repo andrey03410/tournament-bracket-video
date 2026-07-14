@@ -50,11 +50,12 @@ export async function fetchPoster(posterPath: string): Promise<{ data: Buffer; c
       signal: ctrl.signal,
     });
     if (!res.ok) throw new Error("POSTER_FETCH_FAILED");
+    const contentType = res.headers.get("content-type") || "image/jpeg";
+    if (!contentType.startsWith("image/")) throw new Error("POSTER_FETCH_FAILED");
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.length === 0) throw new Error("POSTER_FETCH_FAILED");
-    return { data: buf, contentType: res.headers.get("content-type") || "image/jpeg" };
-  } catch (e) {
-    if ((e as Error).message === "BAD_IMAGE_PATH") throw e;
+    return { data: buf, contentType };
+  } catch {
     throw new Error("POSTER_FETCH_FAILED");
   } finally {
     clearTimeout(t);
