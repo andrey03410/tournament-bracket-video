@@ -283,8 +283,8 @@ function ShikimoriPanel({ onPoolChange }: { onPoolChange: () => void }) {
   const [results, setResults] = useState<ShkResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [importingId, setImportingId] = useState<number | null>(null);
-  const [doneId, setDoneId] = useState<number | null>(null);
+  const [importingKey, setImportingKey] = useState<string | null>(null);
+  const [doneKey, setDoneKey] = useState<string | null>(null);
 
   useEffect(() => {
     setError(null);
@@ -292,28 +292,35 @@ function ShikimoriPanel({ onPoolChange }: { onPoolChange: () => void }) {
       setResults([]);
       return;
     }
+    const controller = new AbortController();
     const t = setTimeout(async () => {
       setLoading(true);
       try {
         const res = await fetch(`/api/shikimori/search?type=${type}&q=${encodeURIComponent(q)}`, {
           cache: "no-store",
+          signal: controller.signal,
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "Ошибка поиска");
         setResults(data.results as ShkResult[]);
       } catch (e) {
+        if ((e as Error).name === "AbortError") return;
         setError((e as Error).message);
         setResults([]);
       } finally {
         setLoading(false);
       }
     }, 300);
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(t);
+      controller.abort();
+    };
   }, [q, type]);
 
   async function importOne(r: ShkResult) {
     if (!r.posterPath) return;
-    setImportingId(r.id);
+    const key = `${r.type}-${r.id}`;
+    setImportingKey(key);
     setError(null);
     try {
       const res = await fetch("/api/shikimori/import", {
@@ -323,12 +330,12 @@ function ShikimoriPanel({ onPoolChange }: { onPoolChange: () => void }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Не удалось импортировать");
-      setDoneId(r.id);
+      setDoneKey(key);
       onPoolChange();
     } catch (e) {
       setError((e as Error).message);
     } finally {
-      setImportingId(null);
+      setImportingKey(null);
     }
   }
 
@@ -368,15 +375,15 @@ function ShikimoriPanel({ onPoolChange }: { onPoolChange: () => void }) {
                 </span>
                 {r.facts ? <span className="muted" style={{ fontSize: 12 }}>{r.facts}</span> : null}
               </span>
-              {doneId === r.id ? (
+              {doneKey === `${r.type}-${r.id}` ? (
                 <span style={{ fontSize: 12, color: "#7be29a" }}>в пуле</span>
               ) : (
                 <button
                   className="btn secondary"
-                  disabled={importingId === r.id || !r.posterPath}
+                  disabled={importingKey === `${r.type}-${r.id}` || !r.posterPath}
                   onClick={() => void importOne(r)}
                 >
-                  {importingId === r.id ? "…" : "⬇ В пул"}
+                  {importingKey === `${r.type}-${r.id}` ? "…" : "⬇ В пул"}
                 </button>
               )}
             </div>
