@@ -197,9 +197,9 @@ npm run mcp
 | `shikimori_search` | поиск аниме/персонажа по названию | `[{id, type, label, posterPath, facts}]` |
 | `import_shikimori_poster` | импорт постера в пул как картинку | `{artId}` |
 | `import_youtube_audio` | скачать звук с YouTube (yt-dlp) в пул | `{artId}` |
-| `create_picker_project` | создать пикер (уже с 1 пустым раундом); опционально `orientation: "landscape"\|"portrait"` — дефолт ориентации плиток проекта | `{projectId, firstRoundId}` |
+| `create_picker_project` | создать пикер (уже с 1 пустым раундом); опционально `orientation: "landscape"|"portrait"` — дефолт ориентации плиток проекта | `{projectId, firstRoundId}` |
 | `add_round` | добавить раунд (вопрос/таймер/подписи); опционально `orientation` — переопределяет ориентацию только этого раунда | `{roundId}` |
-| `add_tile` | плитка из готового арта; опционально `fitMode: "cover"\|"fill"\|"contain"` | `{tileId}` |
+| `add_tile` | плитка из готового арта; опционально `fitMode: "cover"|"fill"|"contain"` | `{tileId}` |
 | `add_tile_from_shikimori` | импорт постера + плитка одним вызовом; опционально `fitMode` | `{tileId, artId}` |
 | `set_playlist` | фоновая музыка пикера | `{ok}` |
 | `get_project` | структура проекта для самопроверки | `summary` |
