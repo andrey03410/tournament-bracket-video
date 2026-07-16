@@ -136,6 +136,71 @@ ru/en для персонажа). Клик «⬇ В пул» **синхронн�
 (играет ровно выбранный кусок). Живое превью всего видео — в обоих
 конструкторах.
 
+## MCP-сервер (ИИ сам собирает пикер)
+
+Приложение умеет работать как **MCP-сервер** (stdio): внешний ИИ-клиент
+(Claude Desktop / Claude Code) сам находит материал в Shikimori, импортирует
+постеры и аудио в пул и раскладывает их по раундам проекта «Пикер». Рендер
+остаётся в UI — инструменты возвращают ссылку `/projects/<id>`, вы проверяете
+и рендерите проект сами.
+
+### Запуск
+
+MCP-сервер действует от имени одного аккаунта. Укажите его email и запустите:
+
+```bash
+# .env
+MCP_ACTOR_EMAIL="you@example.com"   # email уже зарегистрированного аккаунта
+
+npm run mcp
+```
+
+Права и квоты берутся из роли этого аккаунта (импорт требует роль с
+`media:upload`; размер пула ограничен квотой роли).
+
+### Подключение из Claude Desktop / Claude Code
+
+В конфиге MCP-клиента (например `claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "tournament-bracket-video": {
+      "command": "npm",
+      "args": ["run", "-s", "mcp"],
+      "cwd": "/абсолютный/путь/к/tournament-bracket-video",
+      "env": { "MCP_ACTOR_EMAIL": "you@example.com" }
+    }
+  }
+}
+```
+
+### Доступные инструменты
+
+| Инструмент | Назначение | Возвращает |
+|---|---|---|
+| `shikimori_find_studio` | найти студию по названию | `[{id, name}]` |
+| `shikimori_studio_animes` | аниме студии (по популярности) | `[{id, type, label, posterPath, facts}]` |
+| `shikimori_anime_characters` | персонажи аниме (по умолчанию Main) | `[{id, type, label, posterPath}]` |
+| `shikimori_search` | поиск аниме/персонажа по названию | `[{id, type, label, posterPath, facts}]` |
+| `import_shikimori_poster` | импорт постера в пул как картинку | `{artId}` |
+| `import_youtube_audio` | скачать звук с YouTube (yt-dlp) в пул | `{artId}` |
+| `create_picker_project` | создать пикер (уже с 1 пустым раундом) | `{projectId, firstRoundId}` |
+| `add_round` | добавить раунд (вопрос/таймер/подписи) | `{roundId}` |
+| `add_tile` | плитка из готового арта | `{tileId}` |
+| `add_tile_from_shikimori` | импорт постера + плитка одним вызовом | `{tileId, artId}` |
+| `set_playlist` | фоновая музыка пикера | `{ok}` |
+| `get_project` | структура проекта для самопроверки | `summary` |
+
+### Пример сценария (студия Madhouse, 4 варианта, 10 раундов)
+
+Попросите ИИ: «Собери пикер персонажей студии Madhouse, по 4 варианта в
+раунде, 10 раундов, в каждом отметь одного как правильный ответ». ИИ сам:
+`shikimori_find_studio("Madhouse")` → `shikimori_studio_animes` →
+`shikimori_anime_characters` → `create_picker_project` → циклом `add_round` +
+`add_tile_from_shikimori` (один `isAnswer: true`) → `get_project` для сверки →
+отдаёт ссылку на проект. Дальше вы открываете `/projects/<id>` и рендерите.
+
 ## Тесты
 
 ```bash
