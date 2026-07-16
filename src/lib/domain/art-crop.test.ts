@@ -4,6 +4,7 @@ import {
   artCropStyle,
   cropFromColumns,
   type ArtCrop,
+  type FitMode,
 } from "./art-crop";
 
 describe("parseArtCrop", () => {
@@ -99,5 +100,24 @@ describe("cropFromColumns", () => {
     expect(cropFromColumns(null, null, null, null)).toBeNull();
     expect(cropFromColumns(0.1, 0.2, 0.3, null)).toBeNull();
     expect(cropFromColumns(null, 0.2, 0.3, 0.4)).toBeNull();
+  });
+});
+
+describe("artCropStyle fit modes", () => {
+  it("defaults to cover (unchanged behavior)", () => {
+    expect(artCropStyle(null)).toEqual({ width: "100%", height: "100%", objectFit: "cover" });
+  });
+  it("fill stretches and ignores the crop", () => {
+    const s = artCropStyle({ x: 0.1, y: 0.1, w: 0.5, h: 0.5 }, "fill");
+    expect(s).toEqual({ width: "100%", height: "100%", objectFit: "fill" });
+  });
+  it("contain letterboxes and ignores the crop", () => {
+    const s = artCropStyle({ x: 0.1, y: 0.1, w: 0.5, h: 0.5 }, "contain");
+    expect(s).toEqual({ width: "100%", height: "100%", objectFit: "contain" });
+  });
+  it("cover with a crop keeps the positioning behavior", () => {
+    const s = artCropStyle({ x: 0, y: 0, w: 0.5, h: 0.5 }, "cover");
+    expect(s.position).toBe("absolute");
+    expect(s.width).toBe("200%");
   });
 });

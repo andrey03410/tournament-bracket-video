@@ -9,6 +9,8 @@ export interface ArtCrop {
   h: number;
 }
 
+export type FitMode = "cover" | "fill" | "contain";
+
 export type ParseArtCropResult =
   | { ok: true; crop: ArtCrop | null }
   | { ok: false };
@@ -49,12 +51,18 @@ export function cropFromColumns(
 const pct = (v: number) => `${Number((v * 100).toFixed(4))}%`;
 
 /**
- * CSS for an <img> inside a relatively-positioned, overflow-hidden container so
- * that exactly the crop rect fills the container. Used by both the Remotion
- * composition (preview + headless render) and constructor thumbnails, so the
- * picture is guaranteed identical everywhere. null -> plain cover.
+ * CSS for an <img>/<video> inside a relatively-positioned, overflow-hidden
+ * container. `cover` (default) keeps the existing crop/cover behavior; `fill`
+ * stretches to the container (ignoring the crop); `contain` letterboxes the
+ * whole frame (ignoring the crop). Used by the Remotion composition and the
+ * constructor thumbnails so the picture is identical everywhere.
  */
-export function artCropStyle(crop: ArtCrop | null): Record<string, string> {
+export function artCropStyle(
+  crop: ArtCrop | null,
+  fitMode: FitMode = "cover",
+): Record<string, string> {
+  if (fitMode === "fill") return { width: "100%", height: "100%", objectFit: "fill" };
+  if (fitMode === "contain") return { width: "100%", height: "100%", objectFit: "contain" };
   if (!crop) return { width: "100%", height: "100%", objectFit: "cover" };
   return {
     position: "absolute",
