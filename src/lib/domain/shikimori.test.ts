@@ -5,6 +5,8 @@ import {
   pickLabel,
   absoluteImageUrl,
   isSafeImagePath,
+  matchStudios,
+  extractRoleCharacters,
 } from "@/lib/domain/shikimori";
 
 const rawAnime = {
@@ -93,5 +95,46 @@ describe("isSafeImagePath", () => {
     expect(isSafeImagePath("/uploads/1.jpg")).toBe(false);
     expect(isSafeImagePath("/system/users/original/1.jpg")).toBe(false);
     expect(isSafeImagePath("")).toBe(false);
+  });
+});
+
+describe("matchStudios", () => {
+  const studios = [
+    { id: 11, name: "Madhouse", filtered_name: "Madhouse", real: false, image: null },
+    { id: 2, name: "Studio Madhouse Jr", filtered_name: "Madhouse Jr", real: false },
+    { id: 7, name: "Bones", filtered_name: "Bones" },
+    { id: 99, name: 123 }, // мусор: name не строка
+  ];
+  it("matches by name substring, case-insensitive", () => {
+    const res = matchStudios(studios, "madhouse", 10);
+    expect(res.map((s) => s.id).sort((a, b) => a - b)).toEqual([2, 11]);
+    expect(res[0]).toEqual({ id: 11, name: "Madhouse" });
+  });
+  it("matches by filtered_name when name differs", () => {
+    const res = matchStudios([{ id: 5, name: "Studio X", filtered_name: "Bones" }], "bones", 10);
+    expect(res).toEqual([{ id: 5, name: "Studio X" }]);
+  });
+  it("respects the limit and skips malformed entries", () => {
+    expect(matchStudios(studios, "o", 1)).toHaveLength(1);
+    expect(matchStudios(studios, "", 10)).toEqual([]);
+  });
+});
+
+describe("extractRoleCharacters", () => {
+  const roles = [
+    { roles: ["Main"], character: { id: 17, name: "Naruto", russian: "Наруто",
+      image: { original: "/system/characters/original/17.jpg", preview: "/system/characters/preview/17.jpg" } } },
+    { roles: ["Supporting"], character: { id: 18, name: "Sakura", russian: "Сакура",
+      image: { original: "/system/characters/original/18.jpg", preview: "/system/characters/preview/18.jpg" } } },
+    { roles: ["Main"], character: { id: "bad" } }, // мусорный персонаж
+  ];
+  it("keeps only Main-role characters and maps them", () => {
+    const res = extractRoleCharacters(roles, "Main");
+    expect(res).toHaveLength(1);
+    expect(res[0]).toMatchObject({ id: 17, name: "Naruto", russian: "Наруто",
+      posterPath: "/system/characters/original/17.jpg" });
+  });
+  it("role='all' keeps every valid character", () => {
+    expect(extractRoleCharacters(roles, "all").map((c) => c.id).sort()).toEqual([17, 18]);
   });
 });

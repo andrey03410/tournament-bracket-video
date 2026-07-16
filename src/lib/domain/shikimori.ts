@@ -84,3 +84,51 @@ export function isSafeImagePath(path: string): boolean {
     path,
   );
 }
+
+export interface StudioResult {
+  id: number;
+  name: string;
+}
+
+interface RawStudio {
+  id?: unknown;
+  name?: unknown;
+  filtered_name?: unknown;
+}
+
+/** Studios have no search endpoint — filter the full list by name locally. */
+export function matchStudios(rawList: unknown[], query: string, limit: number): StudioResult[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const out: StudioResult[] = [];
+  for (const raw of rawList) {
+    const s = raw as RawStudio;
+    if (typeof s?.id !== "number" || typeof s?.name !== "string" || !s.name.trim()) continue;
+    const filtered = typeof s.filtered_name === "string" ? s.filtered_name : "";
+    if (s.name.toLowerCase().includes(q) || filtered.toLowerCase().includes(q)) {
+      out.push({ id: s.id, name: s.name });
+    }
+  }
+  return out.slice(0, limit);
+}
+
+interface RawRoleEntry {
+  roles?: unknown;
+  character?: unknown;
+}
+
+/** Pull characters out of an /animes/:id/roles response, optionally Main-only. */
+export function extractRoleCharacters(
+  rawRoles: unknown[],
+  role: "Main" | "all",
+): CharacterResult[] {
+  const out: CharacterResult[] = [];
+  for (const raw of rawRoles) {
+    const r = raw as RawRoleEntry;
+    const roles = Array.isArray(r?.roles) ? r.roles : [];
+    if (role === "Main" && !roles.includes("Main")) continue;
+    const ch = mapCharacterResult(r?.character);
+    if (ch) out.push(ch);
+  }
+  return out;
+}
