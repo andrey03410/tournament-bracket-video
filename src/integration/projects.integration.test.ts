@@ -426,6 +426,26 @@ describe("phase 11: orientation + fitMode", () => {
     expect(t.cropW).toBeNull();
     await deleteProject(userId, p.id);
   });
+
+  it("keeps crops of tiles in override-carrying rounds when project orientation flips", async () => {
+    const p = await createProject(userId, "Кроп сохранён переопределение", "picker"); // landscape by default
+    const round = (await getProject(userId, p.id))!.rounds[0];
+
+    // Give the round an explicit override matching the project default
+    await patchRound(userId, round.id, { tileOrientation: "landscape" });
+    const tile = await addTile(userId, round.id, imageArtId);
+
+    await patchTile(userId, tile.id, { crop: { x: 0, y: 0, w: 0.5, h: 0.5 } });
+    // Flip the project orientation; the round's effective orientation stays the same due to override
+    await patchProject(userId, p.id, { tileOrientation: "portrait" });
+    const t = await prisma.pickerTile.findUniqueOrThrow({ where: { id: tile.id } });
+    // Crop must be preserved because the round's effective orientation didn't change
+    expect(t.cropX).toBe(0);
+    expect(t.cropY).toBe(0);
+    expect(t.cropW).toBe(0.5);
+    expect(t.cropH).toBe(0.5);
+    await deleteProject(userId, p.id);
+  });
 });
 
 describe("project deletion", () => {
