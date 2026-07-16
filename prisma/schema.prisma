@@ -109,6 +109,8 @@ model VideoProject {
   bgArt           Art?    @relation("ProjectBg", fields: [bgArtId], references: [id], onDelete: SetNull)
   bgMusicArtId    String?
   bgMusicArt      Art?    @relation("ProjectBgMusic", fields: [bgMusicArtId], references: [id], onDelete: SetNull)
+  // "landscape" | "portrait" — default tile orientation; rounds inherit unless overridden.
+  tileOrientation String  @default("landscape")
 
   rounds       PickerRound[]
   playlist     PickerPlaylistItem[]
@@ -145,6 +147,8 @@ model PickerRound {
   bgArt        Art?    @relation("RoundBg", fields: [bgArtId], references: [id], onDelete: SetNull)
   bgMusicArtId String?
   bgMusicArt   Art?    @relation("RoundBgMusic", fields: [bgMusicArtId], references: [id], onDelete: SetNull)
+  // "landscape" | "portrait" override, or null = inherit the project default.
+  tileOrientation String?
 
   tiles PickerTile[]
 }
@@ -160,6 +164,8 @@ model PickerTile {
   isAnswer  Boolean @default(false)
   // Play the tile video's own sound during its reveal window (video with audio only).
   playSound Boolean @default(true)
+  // "cover" | "fill" | "contain" — how the art fills the tile rect.
+  fitMode   String  @default("cover")
   // Footage start offset for video tiles.
   startSec  Float?
   // Non-destructive 16:9 crop, same semantics as RenderItem.artCrop*.

@@ -3,7 +3,7 @@ import path from "node:path";
 import { prisma } from "@/lib/db";
 import { removePath } from "@/lib/storage";
 import { parseArtCrop } from "@/lib/domain/art-crop";
-import { MAX_TILES } from "@/lib/domain/picker-layout";
+import { MAX_TILES, effectiveOrientation, type TileOrientation } from "@/lib/domain/picker-layout";
 
 // Video projects (phase 6): a standalone "top" (manual positions) or a
 // "picker" (rounds of 2-9 tiles). Framework-free service layer, thin routes
@@ -17,6 +17,11 @@ const LIMITS = {
   timerSec: { min: 1, max: 60 },
   maxRounds: 50,
 };
+
+const ORIENTATIONS = ["landscape", "portrait"] as const;
+const FIT_MODES = ["cover", "fill", "contain"] as const;
+const isOrientation = (v: unknown): v is TileOrientation =>
+  typeof v === "string" && (ORIENTATIONS as readonly string[]).includes(v);
 
 export async function createProject(userId: string, title: string, kind: string) {
   if (!PROJECT_KINDS.includes(kind as ProjectKind)) throw new Error("BAD_KIND");
@@ -101,6 +106,17 @@ async function resolveArtRef(
   return art.id;
 }
 
+const CROP_RESET = { cropX: null, cropY: null, cropW: null, cropH: null };
+
+/** Reset crops of tiles whose effective orientation just changed. */
+async function resetCropsForRounds(roundIds: string[]) {
+  if (roundIds.length === 0) return;
+  await prisma.pickerTile.updateMany({
+    where: { roundId: { in: roundIds } },
+    data: CROP_RESET,
+  });
+}
+
 export interface ProjectPatch {
   title?: string;
   revealSec?: number;
@@ -109,10 +125,11 @@ export interface ProjectPatch {
   tickSound?: boolean;
   bgArtId?: unknown; // image|video art id, or null to clear
   bgMusicArtId?: unknown; // audio art id, or null to clear
+  tileOrientation?: unknown;
 }
 
 export async function patchProject(userId: string, id: string, patch: ProjectPatch) {
-  await ownedProject(userId, id);
+  const project = await ownedProject(userId, id);
   const data: Record<string, unknown> = {};
 
   if (patch.title !== undefined) {
@@ -135,6 +152,17 @@ export async function patchProject(userId: string, id: string, patch: ProjectPat
   }
   if (patch.bgMusicArtId !== undefined) {
     data.bgMusicArtId = await resolveArtRef(userId, patch.bgMusicArtId, ["audio"], "BAD_MUSIC");
+  }
+  if (patch.tileOrientation !== undefined) {
+    if (!isOrientation(patch.tileOrientation)) throw new Error("BAD_ORIENTATION");
+    data.tileOrientation = patch.tileOrientation;
+    if (patch.tileOrientation !== project.tileOrientation) {
+      const rounds = await prisma.pickerRound.findMany({
+        where: { projectId: id, tileOrientation: null },
+        select: { id: true },
+      });
+      await resetCropsForRounds(rounds.map((r) => r.id));
+    }
   }
   return prisma.videoProject.update({ where: { id }, data });
 }
@@ -215,6 +243,7 @@ export interface RoundPatch {
   timerSec?: number | null;
   bgArtId?: unknown;
   bgMusicArtId?: unknown;
+  tileOrientation?: unknown;
 }
 
 export async function patchRound(userId: string, roundId: string, patch: RoundPatch) {
@@ -245,6 +274,20 @@ export async function patchRound(userId: string, roundId: string, patch: RoundPa
   }
   if (patch.bgMusicArtId !== undefined) {
     data.bgMusicArtId = await resolveArtRef(userId, patch.bgMusicArtId, ["audio"], "BAD_MUSIC");
+  }
+  if (patch.tileOrientation !== undefined) {
+    if (patch.tileOrientation !== null && !isOrientation(patch.tileOrientation))
+      throw new Error("BAD_ORIENTATION");
+    const oldEff = effectiveOrientation(
+      round.tileOrientation as TileOrientation | null,
+      round.project.tileOrientation as TileOrientation,
+    );
+    const newEff = effectiveOrientation(
+      (patch.tileOrientation as TileOrientation | null) ?? null,
+      round.project.tileOrientation as TileOrientation,
+    );
+    data.tileOrientation = patch.tileOrientation;
+    if (oldEff !== newEff) await resetCropsForRounds([round.id]);
   }
   await prisma.pickerRound.update({ where: { id: round.id }, data });
   return touch(round.projectId);
@@ -290,6 +333,7 @@ export interface TilePatch {
   playSound?: boolean;
   startSec?: unknown;
   crop?: unknown;
+  fitMode?: unknown;
 }
 
 export async function patchTile(userId: string, tileId: string, patch: TilePatch) {
@@ -312,6 +356,11 @@ export async function patchTile(userId: string, tileId: string, patch: TilePatch
         throw new Error("INVALID_START");
       data.startSec = v;
     }
+  }
+  if (patch.fitMode !== undefined) {
+    if (!(FIT_MODES as readonly string[]).includes(String(patch.fitMode)))
+      throw new Error("BAD_FIT");
+    data.fitMode = patch.fitMode;
   }
   if (patch.crop !== undefined) {
     const parsed = parseArtCrop(patch.crop);

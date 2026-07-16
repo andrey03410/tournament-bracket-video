@@ -360,6 +360,74 @@ describe("background-music playlist", () => {
   });
 });
 
+describe("phase 11: orientation + fitMode", () => {
+  it("patchProject validates and stores tileOrientation", async () => {
+    const p = await createProject(userId, "Ориентация проекта", "picker");
+    await patchProject(userId, p.id, { tileOrientation: "portrait" });
+    const fresh = await getProject(userId, p.id);
+    expect(fresh!.tileOrientation).toBe("portrait");
+    await expect(patchProject(userId, p.id, { tileOrientation: "diagonal" })).rejects.toThrow(
+      "BAD_ORIENTATION",
+    );
+    await deleteProject(userId, p.id);
+  });
+
+  it("patchRound override + reset (null) works", async () => {
+    const p = await createProject(userId, "Ориентация раунда", "picker");
+    const r = (await getProject(userId, p.id))!.rounds[0];
+
+    await patchRound(userId, r.id, { tileOrientation: "portrait" });
+    let loaded = await getProject(userId, p.id);
+    expect(loaded!.rounds[0].tileOrientation).toBe("portrait");
+
+    await patchRound(userId, r.id, { tileOrientation: null });
+    loaded = await getProject(userId, p.id);
+    expect(loaded!.rounds[0].tileOrientation).toBeNull();
+    await deleteProject(userId, p.id);
+  });
+
+  it("patchTile validates and stores fitMode", async () => {
+    const p = await createProject(userId, "FitMode", "picker");
+    const round = (await getProject(userId, p.id))!.rounds[0];
+    const tile = await addTile(userId, round.id, imageArtId);
+
+    await patchTile(userId, tile.id, { fitMode: "contain" });
+    let loaded = await getProject(userId, p.id);
+    expect(loaded!.rounds[0].tiles[0].fitMode).toBe("contain");
+
+    await expect(patchTile(userId, tile.id, { fitMode: "squish" })).rejects.toThrow("BAD_FIT");
+    await deleteProject(userId, p.id);
+  });
+
+  it("changing a round's effective orientation resets its tiles' crops", async () => {
+    const p = await createProject(userId, "Кроп сброс раунд", "picker"); // landscape by default
+    const round = (await getProject(userId, p.id))!.rounds[0];
+    const tile = await addTile(userId, round.id, imageArtId);
+
+    await patchTile(userId, tile.id, { crop: { x: 0, y: 0, w: 0.5, h: 0.5 } });
+    await patchRound(userId, round.id, { tileOrientation: "portrait" });
+    const t = await prisma.pickerTile.findUniqueOrThrow({ where: { id: tile.id } });
+    expect(t.cropX).toBeNull();
+    expect(t.cropY).toBeNull();
+    expect(t.cropW).toBeNull();
+    expect(t.cropH).toBeNull();
+    await deleteProject(userId, p.id);
+  });
+
+  it("changing project orientation resets crops of tiles in rounds without an override", async () => {
+    const p = await createProject(userId, "Кроп сброс проект", "picker"); // landscape by default
+    const round = (await getProject(userId, p.id))!.rounds[0];
+    const tile = await addTile(userId, round.id, imageArtId);
+
+    await patchTile(userId, tile.id, { crop: { x: 0, y: 0, w: 0.5, h: 0.5 } });
+    await patchProject(userId, p.id, { tileOrientation: "portrait" });
+    const t = await prisma.pickerTile.findUniqueOrThrow({ where: { id: tile.id } });
+    expect(t.cropX).toBeNull();
+    expect(t.cropW).toBeNull();
+    await deleteProject(userId, p.id);
+  });
+});
+
 describe("project deletion", () => {
   it("removes render outputs from disk", async () => {
     const p = await createProject(userId, "С джобой", "picker");
