@@ -4,8 +4,9 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Player } from "@remotion/player";
 import { PickerVideo } from "@/remotion/PickerVideo";
 import type { PickerPlan } from "@/lib/domain/picker-plan";
-import type { ArtCrop } from "@/lib/domain/art-crop";
+import type { ArtCrop, FitMode } from "@/lib/domain/art-crop";
 import { artCropStyle } from "@/lib/domain/art-crop";
+import { effectiveOrientation, type TileOrientation } from "@/lib/domain/picker-layout";
 import {
   ArtGalleryModal,
   type GalleryKind,
@@ -34,6 +35,7 @@ interface TileDto {
   playSound: boolean;
   startSec: number | null;
   crop: ArtCrop | null;
+  fitMode: FitMode;
 }
 interface RoundDto {
   id: string;
@@ -47,6 +49,7 @@ interface RoundDto {
   bgArt: ArtDto | null;
   bgMusicArt: ArtDto | null;
   tiles: TileDto[];
+  tileOrientation: TileOrientation | null;
 }
 interface ProjectDto {
   id: string;
@@ -61,6 +64,15 @@ interface ProjectDto {
   playlist: ArtDto[];
   rounds: RoundDto[];
   invalidRounds: number[];
+  tileOrientation: TileOrientation;
+}
+
+function roundOrientation(round: RoundDto, project: ProjectDto): TileOrientation {
+  return effectiveOrientation(round.tileOrientation, project.tileOrientation);
+}
+
+function aspectOf(o: TileOrientation): number {
+  return o === "portrait" ? 2 / 3 : 16 / 9;
 }
 interface JobDto {
   id: string;
@@ -75,7 +87,7 @@ type ModalState =
   | { kind: "bg"; roundId: string | null } // null = project default
   | { kind: "music"; roundId: string | null } // roundId=null -> append to the playlist
   | { kind: "tile"; roundId: string }
-  | { kind: "crop"; tileId: string; url: string; mediaKind: "image" | "video"; crop: ArtCrop | null }
+  | { kind: "crop"; roundId: string; tileId: string; url: string; mediaKind: "image" | "video"; crop: ArtCrop | null }
   | null;
 
 function fmtDur(sec: number): string {
@@ -321,6 +333,16 @@ export function PickerConstructor({
               <span>Тик-так на таймере</span>
             </label>
           </div>
+          <div>
+            <label>Ориентация блоков</label>
+            <select
+              value={project.tileOrientation}
+              onChange={(e) => void patchProject({ tileOrientation: e.target.value })}
+            >
+              <option value="landscape">Горизонтальные</option>
+              <option value="portrait">Вертикальные</option>
+            </select>
+          </div>
         </div>
         <label className="row" style={{ gap: 8, marginTop: 10 }}>
           <input
@@ -471,6 +493,19 @@ export function PickerConstructor({
                 <option value="always">Всегда</option>
                 <option value="never">Никогда</option>
               </select>
+              <label style={{ marginTop: 6, display: "block" }}>Ориентация блоков раунда</label>
+              <select
+                value={round.tileOrientation ?? ""}
+                onChange={(e) =>
+                  void patchRound(round.id, {
+                    tileOrientation: e.target.value === "" ? null : e.target.value,
+                  })
+                }
+              >
+                <option value="">Как у проекта</option>
+                <option value="landscape">Горизонтальные</option>
+                <option value="portrait">Вертикальные</option>
+              </select>
               <div className="row" style={{ gap: 10, marginTop: 6 }}>
                 <div style={{ flex: 1 }}>
                   <label>Показ блока, сек</label>
@@ -551,18 +586,18 @@ export function PickerConstructor({
           <div className="tile-grid">
             {round.tiles.map((tile) => (
               <div className="tile-card" key={tile.id}>
-                <div className="tile-thumb">
+                <div className={`tile-thumb${roundOrientation(round, project) === "portrait" ? " tile-portrait" : ""}`}>
                   {tile.art ? (
                     tile.art.kind === "video" ? (
                       tile.art.posterUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={tile.art.posterUrl} alt="" style={artCropStyle(tile.crop)} />
+                        <img src={tile.art.posterUrl} alt="" style={artCropStyle(tile.crop, tile.fitMode)} />
                       ) : (
-                        <video src={tile.art.url} muted preload="metadata" style={artCropStyle(tile.crop)} />
+                        <video src={tile.art.url} muted preload="metadata" style={artCropStyle(tile.crop, tile.fitMode)} />
                       )
                     ) : (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={tile.art.url} alt="" style={artCropStyle(tile.crop)} />
+                      <img src={tile.art.url} alt="" style={artCropStyle(tile.crop, tile.fitMode)} />
                     )
                   ) : null}
                   {tile.isAnswer ? <span className="tile-answer">✔ ответ</span> : null}
@@ -572,25 +607,36 @@ export function PickerConstructor({
                   defaultValue={tile.label ?? ""}
                   onBlur={(e) => void patchTile(tile.id, { label: e.target.value || null })}
                 />
+                <select
+                  value={tile.fitMode}
+                  onChange={(e) => void patchTile(tile.id, { fitMode: e.target.value })}
+                >
+                  <option value="cover">Обрезка</option>
+                  <option value="fill">Растянуть</option>
+                  <option value="contain">Вписать</option>
+                </select>
                 <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
                   <button className="btn ghost" title="Левее" onClick={() => void moveTile(round, tile.id, -1)}>←</button>
                   <button className="btn ghost" title="Правее" onClick={() => void moveTile(round, tile.id, 1)}>→</button>
-                  <button
-                    className="btn ghost"
-                    title="Обрезка 16:9"
-                    onClick={() =>
-                      tile.art &&
-                      setModal({
-                        kind: "crop",
-                        tileId: tile.id,
-                        url: tile.art.url,
-                        mediaKind: tile.art.kind === "video" ? "video" : "image",
-                        crop: tile.crop,
-                      })
-                    }
-                  >
-                    ✂
-                  </button>
+                  {tile.fitMode === "cover" ? (
+                    <button
+                      className="btn ghost"
+                      title="Обрезка"
+                      onClick={() =>
+                        tile.art &&
+                        setModal({
+                          kind: "crop",
+                          roundId: round.id,
+                          tileId: tile.id,
+                          url: tile.art.url,
+                          mediaKind: tile.art.kind === "video" ? "video" : "image",
+                          crop: tile.crop,
+                        })
+                      }
+                    >
+                      ✂
+                    </button>
+                  ) : null}
                   <button
                     className={`btn ghost${tile.isAnswer ? " active" : ""}`}
                     title="Пометить правильным ответом"
@@ -722,6 +768,14 @@ export function PickerConstructor({
           cropTarget={
             modal.kind === "crop"
               ? { artUrl: modal.url, kind: modal.mediaKind, crop: modal.crop }
+              : undefined
+          }
+          aspect={
+            modal.kind === "tile" || modal.kind === "crop"
+              ? (() => {
+                  const r = project.rounds.find((rd) => rd.id === modal.roundId);
+                  return r ? aspectOf(roundOrientation(r, project)) : undefined;
+                })()
               : undefined
           }
           onPick={(res) => void onModalPick(res)}

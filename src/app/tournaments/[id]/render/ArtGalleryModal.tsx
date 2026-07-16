@@ -44,12 +44,14 @@ function CropStep({
   initialCrop,
   onApply,
   onBack,
+  aspect = 16 / 9,
 }: {
   artUrl: string;
   mediaKind: GalleryKind;
   initialCrop: ArtCrop | null;
   onApply: (crop: ArtCrop | null) => void;
   onBack: (() => void) | null;
+  aspect?: number;
 }) {
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
@@ -63,7 +65,7 @@ function CropStep({
           crop={crop}
           zoom={zoom}
           maxZoom={8}
-          aspect={16 / 9}
+          aspect={aspect}
           onCropChange={setCrop}
           onZoomChange={setZoom}
           onCropComplete={(areaPercent) => {
@@ -406,6 +408,7 @@ export function ArtGalleryModal({
   onClose,
   onPoolChange,
   pickKinds = ["image", "video"],
+  aspect = 16 / 9,
 }: {
   mode: "manage" | "pick" | "crop";
   /** For mode="crop": the media being re-cropped and its current crop. */
@@ -416,6 +419,8 @@ export function ArtGalleryModal({
   onPoolChange?: () => void;
   /** Which pool kinds are selectable in mode="pick" (others are hidden). */
   pickKinds?: GalleryKind[];
+  /** Crop aspect ratio (width / height) for the crop step. Defaults to 16:9. */
+  aspect?: number;
 }) {
   const [arts, setArts] = useState<GalleryArt[]>([]);
   const [recent, setRecent] = useState<GalleryArt[]>([]);
@@ -540,7 +545,7 @@ export function ArtGalleryModal({
 
   const title =
     cropArt != null
-      ? "Обрезка (рамка 16:9)"
+      ? `Обрезка (рамка ${aspect === 2 / 3 ? "2:3" : "16:9"})`
       : mode === "manage"
         ? "Менеджер медиа"
         : "Выбор медиа";
@@ -627,6 +632,7 @@ export function ArtGalleryModal({
                 initialCrop={cropArt.crop}
                 onApply={(crop) => onPick?.({ artId: cropArt.artId ?? "", crop })}
                 onBack={mode === "crop" ? null : () => setCropArt(null)}
+                aspect={aspect}
               />
               {cropArt.kind === "video" ? (
                 <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>

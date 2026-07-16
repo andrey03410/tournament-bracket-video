@@ -487,6 +487,9 @@ audio {
   overflow: hidden;
   background: #10131c;
 }
+.tile-thumb.tile-portrait {
+  aspect-ratio: 2 / 3;
+}
 .tile-thumb img,
 .tile-thumb video {
   width: 100%;

@@ -43,6 +43,7 @@ function serialize(p: LoadedProject) {
     bgMusicArt: artDto(p.bgMusicArt),
     // effective playlist (legacy single bgMusicArt shows up as one item)
     playlist: effectivePlaylist(p).map((a) => artDto(a)),
+    tileOrientation: p.tileOrientation,
     rounds: p.rounds.map((r) => ({
       id: r.id,
       order: r.order,
@@ -54,6 +55,7 @@ function serialize(p: LoadedProject) {
       timerSec: r.timerSec,
       bgArt: artDto(r.bgArt),
       bgMusicArt: artDto(r.bgMusicArt),
+      tileOrientation: r.tileOrientation,
       tiles: r.tiles.map((t) => ({
         id: t.id,
         order: t.order,
@@ -67,6 +69,7 @@ function serialize(p: LoadedProject) {
           t.cropX != null && t.cropY != null && t.cropW != null && t.cropH != null
             ? { x: t.cropX, y: t.cropY, w: t.cropW, h: t.cropH }
             : null,
+        fitMode: t.fitMode,
       })),
     })),
     invalidRounds: invalidRounds(p),
