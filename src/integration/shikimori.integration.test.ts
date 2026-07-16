@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createServer, type Server } from "node:http";
 import { prisma } from "@/lib/db";
 import { removePath } from "@/lib/storage";
-import { search, importPoster } from "@/server/shikimori";
+import { search, importPoster, findStudio, studioAnimes, animeCharacters } from "@/server/shikimori";
 
 // Real DB + createArt pipeline; Shikimori is a LOCAL http server pointed at via
 // SHIKIMORI_BASE_URL (no external network). A 1x1 jpg stands in for a poster.
@@ -31,6 +31,32 @@ async function cleanup() {
 beforeAll(async () => {
   server = createServer((req, res) => {
     const url = new URL(req.url!, "http://localhost");
+    if (url.pathname === "/api/studios") {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify([
+        { id: 11, name: "Madhouse", filtered_name: "Madhouse", real: false, image: null },
+        { id: 7, name: "Bones", filtered_name: "Bones", real: false, image: null },
+      ]));
+      return;
+    }
+    if (url.pathname === "/api/animes" && url.searchParams.get("studio")) {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify([
+        { id: 1535, name: "Death Note", russian: "Тетрадь смерти", kind: "tv", score: "8.62", aired_on: "2006-10-04",
+          image: { original: "/system/animes/original/1535.jpg", preview: "/system/animes/preview/1535.jpg" } },
+      ]));
+      return;
+    }
+    if (/^\/api\/animes\/\d+\/roles$/.test(url.pathname)) {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify([
+        { roles: ["Main"], character: { id: 17, name: "Light Yagami", russian: "Лайт Ягами",
+          image: { original: "/system/characters/original/17.jpg", preview: "/system/characters/preview/17.jpg" } } },
+        { roles: ["Supporting"], character: { id: 18, name: "Ryuk", russian: "Рюук",
+          image: { original: "/system/characters/original/18.jpg", preview: "/system/characters/preview/18.jpg" } } },
+      ]));
+      return;
+    }
     if (url.pathname === "/api/animes") {
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify([
@@ -112,5 +138,31 @@ describe("shikimori importPoster", () => {
         label: "Наруто", maxPoolBytes: 1,
       }),
     ).rejects.toThrow("POOL_QUOTA");
+  });
+});
+
+describe("shikimori discovery", () => {
+  it("finds a studio by name", async () => {
+    const res = await findStudio("madhouse");
+    expect(res).toEqual([{ id: 11, name: "Madhouse" }]);
+  });
+  it("returns [] for a blank studio query", async () => {
+    expect(await findStudio("  ")).toEqual([]);
+  });
+  it("lists a studio's animes as DTOs", async () => {
+    const res = await studioAnimes(11);
+    expect(res[0]).toMatchObject({ id: 1535, type: "anime", label: "Тетрадь смерти",
+      posterPath: "/system/animes/original/1535.jpg" });
+    expect(res[0].facts).toContain("2006");
+  });
+  it("returns Main characters of an anime as DTOs", async () => {
+    const res = await animeCharacters(1535);
+    expect(res).toHaveLength(1);
+    expect(res[0]).toMatchObject({ id: 17, type: "character", label: "Лайт Ягами",
+      posterPath: "/system/characters/original/17.jpg" });
+  });
+  it("role='all' includes supporting characters", async () => {
+    const res = await animeCharacters(1535, { role: "all" });
+    expect(res.map((c) => c.id).sort()).toEqual([17, 18]);
   });
 });

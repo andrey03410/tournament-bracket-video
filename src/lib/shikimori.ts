@@ -39,6 +39,27 @@ export async function searchCharactersRaw(q: string): Promise<unknown[]> {
   return Array.isArray(data) ? data : [];
 }
 
+export async function fetchStudiosRaw(): Promise<unknown[]> {
+  const data = await getJson(`/api/studios`);
+  return Array.isArray(data) ? data : [];
+}
+
+export async function fetchStudioAnimesRaw(
+  studioId: number,
+  order: string,
+  limit: number,
+): Promise<unknown[]> {
+  const data = await getJson(
+    `/api/animes?studio=${studioId}&order=${encodeURIComponent(order)}&limit=${limit}`,
+  );
+  return Array.isArray(data) ? data : [];
+}
+
+export async function fetchAnimeRolesRaw(animeId: number): Promise<unknown[]> {
+  const data = await getJson(`/api/animes/${animeId}/roles`);
+  return Array.isArray(data) ? data : [];
+}
+
 export async function fetchPoster(posterPath: string): Promise<{ data: Buffer; contentType: string }> {
   if (!isSafeImagePath(posterPath)) throw new Error("BAD_IMAGE_PATH");
   const ctrl = new AbortController();
