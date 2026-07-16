@@ -5,7 +5,7 @@ import { resolveActor, type Actor } from "@/mcp/actor";
 import { can, quotasFor } from "@/lib/domain/permissions";
 import { search, findStudio, studioAnimes, animeCharacters, importPoster } from "@/server/shikimori";
 import {
-  createProject, getProject, addRound, patchRound, addTile, patchTile, setPlaylist,
+  createProject, getProject, addRound, patchRound, addTile, patchTile, patchProject, setPlaylist,
 } from "@/server/projects";
 import { addTileFromShikimori } from "@/mcp/compose";
 import { importYoutubeAudio } from "@/mcp/youtube";
@@ -83,31 +83,36 @@ async function main() {
   server.registerTool(
     "create_picker_project",
     { description: "Создать проект «Пикер». Стартует с одним пустым раундом (firstRoundId). → {projectId, firstRoundId}",
-      inputSchema: { title: z.string() } },
-    ({ title }) => guard(async () => {
+      inputSchema: { title: z.string(), orientation: z.enum(["landscape", "portrait"]).optional() } },
+    ({ title, orientation }) => guard(async () => {
       const project = await createProject(uid, title, "picker");
+      if (orientation != null) {
+        await patchProject(uid, project.id, { tileOrientation: orientation });
+      }
       const loaded = await getProject(uid, project.id);
       return { projectId: project.id, firstRoundId: loaded!.rounds[0]?.id ?? null };
     }),
   );
   server.registerTool(
     "add_round",
-    { description: "Добавить раунд в пикер. Необязательные поля настраивают вопрос/таймер/показ ответа/подписи. → {roundId}",
+    { description: "Добавить раунд в пикер. Необязательные поля настраивают вопрос/таймер/показ ответа/подписи/ориентацию. → {roundId}",
       inputSchema: {
         projectId: z.string(),
         prompt: z.string().optional(),
         timerSec: z.number().optional(),
         revealSec: z.number().optional(),
         labelsMode: z.enum(["always", "finale", "never"]).optional(),
+        orientation: z.enum(["landscape", "portrait"]).optional(),
       } },
-    ({ projectId, prompt, timerSec, revealSec, labelsMode }) => guard(async () => {
+    ({ projectId, prompt, timerSec, revealSec, labelsMode, orientation }) => guard(async () => {
       const round = await addRound(uid, projectId);
-      if (prompt != null || timerSec != null || revealSec != null || labelsMode != null) {
+      if (prompt != null || timerSec != null || revealSec != null || labelsMode != null || orientation != null) {
         await patchRound(uid, round.id, {
           ...(prompt != null ? { prompt, showPrompt: true } : {}),
           ...(timerSec != null ? { timerSec } : {}),
           ...(revealSec != null ? { revealSec } : {}),
           ...(labelsMode != null ? { labelsMode } : {}),
+          ...(orientation != null ? { tileOrientation: orientation } : {}),
         });
       }
       return { roundId: round.id };
@@ -116,13 +121,17 @@ async function main() {
   server.registerTool(
     "add_tile",
     { description: "Добавить плитку из уже импортированного арта (image/video) в раунд. → {tileId}",
-      inputSchema: { roundId: z.string(), artId: z.string(), label: z.string().optional(), isAnswer: z.boolean().optional() } },
-    ({ roundId, artId, label, isAnswer }) => guard(async () => {
+      inputSchema: {
+        roundId: z.string(), artId: z.string(), label: z.string().optional(), isAnswer: z.boolean().optional(),
+        fitMode: z.enum(["cover", "fill", "contain"]).optional(),
+      } },
+    ({ roundId, artId, label, isAnswer, fitMode }) => guard(async () => {
       const tile = await addTile(uid, roundId, artId);
-      if (label != null || isAnswer) {
+      if (label != null || isAnswer || fitMode != null) {
         await patchTile(uid, tile.id, {
           ...(label != null ? { label } : {}),
           ...(isAnswer ? { isAnswer: true } : {}),
+          ...(fitMode != null ? { fitMode } : {}),
         });
       }
       return { tileId: tile.id };
@@ -134,13 +143,20 @@ async function main() {
       inputSchema: {
         roundId: z.string(), type: z.enum(["anime", "character"]), id: z.number(),
         posterPath: z.string(), label: z.string().optional(), isAnswer: z.boolean().optional(),
+        fitMode: z.enum(["cover", "fill", "contain"]).optional(),
       } },
-    ({ roundId, type, id, posterPath, label, isAnswer }) =>
+    ({ roundId, type, id, posterPath, label, isAnswer, fitMode }) =>
       !canUpload ? Promise.resolve(fail("Импорт медиа недоступен вашей роли"))
-        : guard(() => addTileFromShikimori(uid, {
-            roundId, type: type as ShikimoriType, id, posterPath,
-            label: label ?? null, isAnswer, maxPoolBytes,
-          })),
+        : guard(async () => {
+            const result = await addTileFromShikimori(uid, {
+              roundId, type: type as ShikimoriType, id, posterPath,
+              label: label ?? null, isAnswer, maxPoolBytes,
+            });
+            if (fitMode != null) {
+              await patchTile(uid, result.tileId, { fitMode });
+            }
+            return result;
+          }),
   );
   server.registerTool(
     "set_playlist",

@@ -121,7 +121,10 @@ describe("MCP server end-to-end (Madhouse scenario)", () => {
   });
 
   it("builds a two-round picker with answers via tools", async () => {
-    const { projectId, firstRoundId } = await call("create_picker_project", { title: "Персонажи Madhouse" });
+    const { projectId, firstRoundId } = await call("create_picker_project", {
+      title: "Персонажи Madhouse",
+      orientation: "portrait",
+    });
     expect(projectId).toMatch(/.+/);
 
     const studios = await call("shikimori_find_studio", { query: "Madhouse" });
@@ -139,7 +142,7 @@ describe("MCP server end-to-end (Madhouse scenario)", () => {
     });
     await call("add_tile_from_shikimori", {
       roundId: firstRoundId, type: "character", id: 18,
-      posterPath: "/system/characters/original/18.jpg", label: "Эл",
+      posterPath: "/system/characters/original/18.jpg", label: "Эл", fitMode: "contain",
     });
 
     const { roundId } = await call("add_round", { projectId, prompt: "Второй раунд" });
@@ -156,5 +159,12 @@ describe("MCP server end-to-end (Madhouse scenario)", () => {
     // The project really exists in the DB for the actor.
     const rounds = await prisma.pickerRound.count({ where: { projectId, project: { userId } } });
     expect(rounds).toBe(2);
+
+    const proj = await prisma.videoProject.findUniqueOrThrow({ where: { id: projectId } });
+    expect(proj.tileOrientation).toBe("portrait");
+    const answerTile = await prisma.pickerTile.findFirstOrThrow({
+      where: { round: { projectId }, fitMode: "contain" },
+    });
+    expect(answerTile.fitMode).toBe("contain");
   }, 60_000);
 });
