@@ -199,6 +199,8 @@ npm run mcp
 | `import_youtube_audio` | скачать звук с YouTube (yt-dlp) в пул | `{artId}` |
 | `create_picker_project` | создать пикер (уже с 1 пустым раундом); опционально `orientation: "landscape"|"portrait"` — дефолт ориентации плиток проекта | `{projectId, firstRoundId}` |
 | `add_round` | добавить раунд (вопрос/таймер/подписи); опционально `orientation` — переопределяет ориентацию только этого раунда | `{roundId}` |
+| `set_round` | изменить существующий раунд (промпт/таймер/подписи/ориентацию); пустой `prompt` убирает вопрос | `{ok}` |
+| `delete_round` | удалить раунд (например пустой стартовый — для чистого сценария) | `{ok}` |
 | `add_tile` | плитка из готового арта; опционально `fitMode: "cover"|"fill"|"contain"` | `{tileId}` |
 | `add_tile_from_shikimori` | импорт постера + плитка одним вызовом; опционально `fitMode` | `{tileId, artId}` |
 | `set_playlist` | фоновая музыка пикера | `{ok}` |

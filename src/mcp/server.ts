@@ -5,7 +5,7 @@ import { resolveActor, type Actor } from "@/mcp/actor";
 import { can, quotasFor } from "@/lib/domain/permissions";
 import { search, findStudio, studioAnimes, animeCharacters, importPoster } from "@/server/shikimori";
 import {
-  createProject, getProject, addRound, patchRound, addTile, patchTile, patchProject, setPlaylist,
+  createProject, getProject, addRound, patchRound, deleteRound, addTile, patchTile, patchProject, setPlaylist,
 } from "@/server/projects";
 import { addTileFromShikimori } from "@/mcp/compose";
 import { importYoutubeAudio } from "@/mcp/youtube";
@@ -173,6 +173,34 @@ async function main() {
       if (!p) throw new Error("Проект не найден");
       return projectSummary(p);
     }),
+  );
+  server.registerTool(
+    "set_round",
+    { description: "Изменить существующий раунд (промпт/таймер/подписи/ориентацию). Пустой prompt (\"\") убирает вопрос; orientation:null снимает оверрайд. → {ok:true}",
+      inputSchema: {
+        roundId: z.string(),
+        prompt: z.string().optional(),
+        timerSec: z.number().optional(),
+        revealSec: z.number().optional(),
+        labelsMode: z.enum(["always", "finale", "never"]).optional(),
+        orientation: z.enum(["landscape", "portrait"]).nullable().optional(),
+      } },
+    ({ roundId, prompt, timerSec, revealSec, labelsMode, orientation }) => guard(async () => {
+      await patchRound(uid, roundId, {
+        ...(prompt !== undefined ? { prompt, showPrompt: prompt.trim() !== "" } : {}),
+        ...(timerSec != null ? { timerSec } : {}),
+        ...(revealSec != null ? { revealSec } : {}),
+        ...(labelsMode != null ? { labelsMode } : {}),
+        ...(orientation !== undefined ? { tileOrientation: orientation } : {}),
+      });
+      return { ok: true };
+    }),
+  );
+  server.registerTool(
+    "delete_round",
+    { description: "Удалить раунд пикера (например пустой стартовый, чтобы сценарий был чистым). → {ok:true}",
+      inputSchema: { roundId: z.string() } },
+    ({ roundId }) => guard(async () => { await deleteRound(uid, roundId); return { ok: true }; }),
   );
 
   const transport = new StdioServerTransport();

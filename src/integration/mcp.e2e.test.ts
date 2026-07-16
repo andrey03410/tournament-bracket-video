@@ -166,5 +166,17 @@ describe("MCP server end-to-end (Madhouse scenario)", () => {
       where: { round: { projectId }, fitMode: "contain" },
     });
     expect(answerTile.fitMode).toBe("contain");
+
+    // set_round edits an existing round's prompt in place.
+    await call("set_round", { roundId: firstRoundId, prompt: "Обновлённый вопрос" });
+    const edited = await prisma.pickerRound.findUniqueOrThrow({ where: { id: firstRoundId } });
+    expect(edited.prompt).toBe("Обновлённый вопрос");
+
+    // delete_round removes a round (clean scenarios): add a throwaway, delete it.
+    const { roundId: tmpRoundId } = await call("add_round", { projectId, prompt: "Черновик" });
+    expect(await prisma.pickerRound.count({ where: { projectId } })).toBe(3);
+    await call("delete_round", { roundId: tmpRoundId });
+    expect(await prisma.pickerRound.count({ where: { projectId } })).toBe(2);
+    expect(await prisma.pickerRound.findUnique({ where: { id: tmpRoundId } })).toBeNull();
   }, 60_000);
 });
