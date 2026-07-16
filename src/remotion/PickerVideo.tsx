@@ -77,7 +77,7 @@ const TileMedia: React.FC<{ tile: PlanTile; mode: AssetMode }> = ({ tile, mode }
         muted
         src={src}
         startFrom={sec(tile.visual.startSec, fps)}
-        style={artCropStyle(tile.visual.crop)}
+        style={artCropStyle(tile.visual.crop, tile.visual.fitMode)}
       />
     );
     // One frame short of the footage length: seeking past the real EOF of a
@@ -90,7 +90,7 @@ const TileMedia: React.FC<{ tile: PlanTile; mode: AssetMode }> = ({ tile, mode }
       video
     );
   }
-  return <Img src={src} style={artCropStyle(tile.visual.crop)} />;
+  return <Img src={src} style={artCropStyle(tile.visual.crop, tile.visual.fitMode)} />;
 };
 
 /** Static tile content for the finale (poster frame for videos). */

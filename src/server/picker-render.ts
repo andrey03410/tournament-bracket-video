@@ -5,7 +5,8 @@ import { mkdir, copyFile } from "node:fs/promises";
 import { prisma } from "@/lib/db";
 import { absPath, renderOutputPath } from "@/lib/storage";
 import { clipAudio, clipVideo, writeTick } from "@/lib/audio";
-import { cropFromColumns } from "@/lib/domain/art-crop";
+import { cropFromColumns, type FitMode } from "@/lib/domain/art-crop";
+import { effectiveOrientation, type TileOrientation } from "@/lib/domain/picker-layout";
 import {
   buildPickerPlan,
   type LabelsMode,
@@ -79,8 +80,10 @@ export function buildPickerPreviewPlan(project: LoadedProject) {
       bgMusic: bgMusicArt
         ? { ref: `/api/arts/${bgMusicArt.id}`, durationSec: bgMusicArt.durationSec }
         : null,
-      // TODO(phase-11): thread round.orientation once the schema carries it.
-      orientation: "landscape",
+      orientation: effectiveOrientation(
+        round.tileOrientation as TileOrientation | null,
+        project.tileOrientation as TileOrientation,
+      ),
       tiles: round.tiles.map((t) => ({
         media: {
           kind: t.art.kind as "image" | "video",
@@ -94,8 +97,7 @@ export function buildPickerPreviewPlan(project: LoadedProject) {
         label: t.label,
         isAnswer: t.isAnswer,
         playSound: t.playSound,
-        // TODO(phase-11): thread tile.fitMode once the schema carries it.
-        fitMode: "cover",
+        fitMode: t.fitMode as FitMode,
       })),
     };
   });
@@ -268,8 +270,7 @@ async function runPickerRender(jobId: string): Promise<void> {
         label: tile.label,
         isAnswer: tile.isAnswer,
         playSound: tile.playSound,
-        // TODO(phase-11): thread tile.fitMode once the schema carries it.
-        fitMode: "cover",
+        fitMode: tile.fitMode as FitMode,
       });
       done++;
       await setProgress(jobId, 0.05 + (0.4 * done) / total);
@@ -284,8 +285,10 @@ async function runPickerRender(jobId: string): Promise<void> {
       timerSec: round.timerSec,
       bg,
       bgMusic,
-      // TODO(phase-11): thread round.orientation once the schema carries it.
-      orientation: "landscape",
+      orientation: effectiveOrientation(
+        round.tileOrientation as TileOrientation | null,
+        project.tileOrientation as TileOrientation,
+      ),
       tiles,
     });
   }
