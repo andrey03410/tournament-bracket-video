@@ -27,6 +27,7 @@ function imageTile(over: Partial<PlanTileInput> = {}): PlanTileInput {
     label: null,
     isAnswer: false,
     playSound: true,
+    fitMode: "cover",
     ...over,
   };
 }
@@ -42,6 +43,7 @@ function videoTile(
     label: null,
     isAnswer: false,
     playSound: true,
+    fitMode: "cover",
     ...over,
   };
 }
@@ -56,6 +58,7 @@ function round(tiles: PlanTileInput[], over: Partial<PlanRoundInput> = {}): Plan
     timerSec: null,
     bg: null,
     bgMusic: null,
+    orientation: "landscape",
     tiles,
     ...over,
   };
@@ -257,5 +260,31 @@ describe("buildMusicCues / plan.music", () => {
   it("no playlist -> plan.music is null", () => {
     const plan = buildPickerPlan(DEFAULTS, [round([imageTile(), imageTile()])]);
     expect(plan.music).toBeNull();
+  });
+});
+
+describe("buildPickerPlan orientation & fitMode", () => {
+  it("uses the round orientation for the layout and carries fitMode", () => {
+    const plan = buildPickerPlan(
+      { revealSec: 3, hideAfterReveal: false, timerSec: 5, tickSound: false },
+      [
+        {
+          prompt: null, showPrompt: false, labelsMode: "always",
+          revealSec: null, hideAfterReveal: null, timerSec: null,
+          bg: null, bgMusic: null,
+          orientation: "portrait",
+          tiles: [
+            { media: { kind: "image", ref: "a", posterRef: null, durationSec: null, hasAudio: false }, crop: null, startSec: null, label: "A", isAnswer: true, playSound: false, fitMode: "contain" },
+            { media: { kind: "image", ref: "b", posterRef: null, durationSec: null, hasAudio: false }, crop: null, startSec: null, label: "B", isAnswer: false, playSound: false, fitMode: "cover" },
+          ],
+        },
+      ],
+    );
+    const round = plan.rounds[0];
+    // portrait 2 tiles -> 2:3 rects (w/h * 16/9 ≈ 0.667)
+    const r0 = round.tiles[0].rect;
+    expect((r0.w / r0.h) * (16 / 9)).toBeCloseTo(2 / 3, 2);
+    expect(round.tiles[0].visual.fitMode).toBe("contain");
+    expect(round.tiles[1].visual.fitMode).toBe("cover");
   });
 });

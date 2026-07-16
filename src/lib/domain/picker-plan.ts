@@ -1,9 +1,9 @@
 // Picker-mode plan: pure timing/layout math shared by the Player preview and
 // the headless render (same contract idea as video-plan.ts for tops).
 
-import type { ArtCrop } from "./art-crop";
+import type { ArtCrop, FitMode } from "./art-crop";
 import { resolveFootage } from "./position-media";
-import { pickerLayout, type TileRect } from "./picker-layout";
+import { pickerLayout, type TileRect, type TileOrientation } from "./picker-layout";
 import type { SegmentVisual } from "./video-plan";
 
 export const FPS = 30;
@@ -42,6 +42,7 @@ export interface PlanTileInput {
   label: string | null;
   isAnswer: boolean;
   playSound: boolean;
+  fitMode: FitMode;
 }
 
 export interface PlanRoundInput {
@@ -53,6 +54,7 @@ export interface PlanRoundInput {
   timerSec: number | null;
   bg: { kind: "image" | "video"; ref: string; durationSec: number | null } | null;
   bgMusic: { ref: string; durationSec: number | null } | null;
+  orientation: TileOrientation;
   tiles: PlanTileInput[];
 }
 
@@ -173,7 +175,7 @@ export function buildPickerPlan(
     const revealSec = round.revealSec ?? defaults.revealSec;
     const hideAfter = round.hideAfterReveal ?? defaults.hideAfterReveal;
     const timerSec = round.timerSec ?? defaults.timerSec;
-    const rects = pickerLayout(Math.max(2, Math.min(9, round.tiles.length)));
+    const rects = pickerLayout(Math.max(2, Math.min(9, round.tiles.length)), round.orientation);
 
     const startSec = cursor;
     const promptShown = round.showPrompt && !!round.prompt?.trim();
@@ -198,6 +200,7 @@ export function buildPickerPlan(
         crop: tile.crop,
         startSec: footage.startSec,
         loopSec: footage.loopSec,
+        fitMode: tile.fitMode,
       };
 
       let sound: PlanTile["sound"] = null;

@@ -14,7 +14,7 @@ export const GAP_SEC = 1; // pause with fade between OST
 export const LABEL_DELAY_SEC = 1; // label appears 1s after art
 export const LABEL_HOLD_SEC = 5; // label visible for 5s
 
-import type { ArtCrop } from "./art-crop";
+import type { ArtCrop, FitMode } from "./art-crop";
 
 export type DisplayOrder = "desc" | "asc";
 
@@ -27,6 +27,8 @@ export interface SegmentVisual {
   startSec: number;
   /** Video: footage length (sec) to loop when shorter than the segment; null = play straight. */
   loopSec: number | null;
+  /** How the media fills the tile: cover (default) / fill / contain. */
+  fitMode?: FitMode;
 }
 
 export interface PlanItemInput {

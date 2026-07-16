@@ -79,6 +79,8 @@ export function buildPickerPreviewPlan(project: LoadedProject) {
       bgMusic: bgMusicArt
         ? { ref: `/api/arts/${bgMusicArt.id}`, durationSec: bgMusicArt.durationSec }
         : null,
+      // TODO(phase-11): thread round.orientation once the schema carries it.
+      orientation: "landscape",
       tiles: round.tiles.map((t) => ({
         media: {
           kind: t.art.kind as "image" | "video",
@@ -92,6 +94,8 @@ export function buildPickerPreviewPlan(project: LoadedProject) {
         label: t.label,
         isAnswer: t.isAnswer,
         playSound: t.playSound,
+        // TODO(phase-11): thread tile.fitMode once the schema carries it.
+        fitMode: "cover",
       })),
     };
   });
@@ -264,6 +268,8 @@ async function runPickerRender(jobId: string): Promise<void> {
         label: tile.label,
         isAnswer: tile.isAnswer,
         playSound: tile.playSound,
+        // TODO(phase-11): thread tile.fitMode once the schema carries it.
+        fitMode: "cover",
       });
       done++;
       await setProgress(jobId, 0.05 + (0.4 * done) / total);
@@ -278,6 +284,8 @@ async function runPickerRender(jobId: string): Promise<void> {
       timerSec: round.timerSec,
       bg,
       bgMusic,
+      // TODO(phase-11): thread round.orientation once the schema carries it.
+      orientation: "landscape",
       tiles,
     });
   }
