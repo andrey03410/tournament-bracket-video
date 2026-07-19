@@ -24,6 +24,27 @@ import {
   resolveFootage,
   type PoolMediaInfo,
 } from "@/lib/domain/position-media";
+import { renderJobDto, type RenderJobDto } from "@/lib/domain/render-jobs";
+
+/**
+ * Render jobs of one tournament or project (newest first), as UI DTOs.
+ * The constructors use this to restore an in-flight or finished job on mount.
+ */
+export async function listRenderJobs(
+  userId: string,
+  owner: { tournamentId: string } | { projectId: string },
+  take = 20,
+): Promise<RenderJobDto[]> {
+  const jobs = await prisma.renderJob.findMany({
+    where:
+      "tournamentId" in owner
+        ? { tournamentId: owner.tournamentId, tournament: { userId } }
+        : { projectId: owner.projectId, project: { userId } },
+    orderBy: { createdAt: "desc" },
+    take,
+  });
+  return jobs.map(renderJobDto);
+}
 
 /** Create a default render config + items (top-N) for a completed tournament. */
 export async function ensureRenderConfig(userId: string, tournamentId: string) {
@@ -293,7 +314,11 @@ async function queueTopRender(owner: { tournamentId?: string; projectId?: string
 }
 
 async function setProgress(jobId: string, progress: number) {
-  await prisma.renderJob.update({ where: { id: jobId }, data: { progress } });
+  // Progress writes are advisory: a transient DB lock must not surface as an
+  // unhandled rejection (callers fire-and-forget) and kill the render.
+  await prisma.renderJob
+    .update({ where: { id: jobId }, data: { progress } })
+    .catch(() => {});
 }
 
 async function runRender(jobId: string): Promise<void> {

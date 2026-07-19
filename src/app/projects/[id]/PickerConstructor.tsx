@@ -151,12 +151,25 @@ export function PickerConstructor({
     setTickUrl(data.tickUrl ?? null);
   }, [projectId]);
 
+  // Restore the latest render job after a page reload / navigation: the render
+  // keeps running server-side, so pick up its progress (or the finished file).
+  const restoreJob = useCallback(async () => {
+    const res = await fetch(`/api/projects/${projectId}/render`, { cache: "no-store" });
+    if (!res.ok) return;
+    const data: { jobs?: JobDto[] } = await res.json();
+    const last = data.jobs?.[0];
+    if (!last) return;
+    setJob(last);
+    if (last.status === "queued" || last.status === "running") pollJob(last.id);
+  }, [projectId]);
+
   useEffect(() => {
     void load();
+    void restoreJob();
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [load]);
+  }, [load, restoreJob]);
 
   async function call(url: string, method: string, body?: unknown) {
     setError(null);

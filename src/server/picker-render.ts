@@ -139,7 +139,11 @@ export async function startPickerRenderJob(userId: string, projectId: string) {
 }
 
 async function setProgress(jobId: string, progress: number) {
-  await prisma.renderJob.update({ where: { id: jobId }, data: { progress } });
+  // Progress writes are advisory: a transient DB lock must not surface as an
+  // unhandled rejection (callers fire-and-forget) and kill the render.
+  await prisma.renderJob
+    .update({ where: { id: jobId }, data: { progress } })
+    .catch(() => {});
 }
 
 async function runPickerRender(jobId: string): Promise<void> {

@@ -149,12 +149,25 @@ export function RenderConstructor({
     setPlan(data.previewPlan);
   }, [baseUrl]);
 
+  // Restore the latest render job after a page reload / navigation: the render
+  // keeps running server-side, so pick up its progress (or the finished file).
+  const restoreJob = useCallback(async () => {
+    const res = await fetch(`${baseUrl}/render`, { cache: "no-store" });
+    if (!res.ok) return;
+    const data: { jobs?: JobDto[] } = await res.json();
+    const last = data.jobs?.[0];
+    if (!last) return;
+    setJob(last);
+    if (last.status === "queued" || last.status === "running") pollJob(last.id);
+  }, [baseUrl]);
+
   useEffect(() => {
     void loadConfig();
+    void restoreJob();
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [loadConfig]);
+  }, [loadConfig, restoreJob]);
 
   async function patchConfig(partial: Record<string, unknown>) {
     await fetch(`${baseUrl}/render/config`, {

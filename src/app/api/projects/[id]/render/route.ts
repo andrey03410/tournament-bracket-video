@@ -1,28 +1,15 @@
 import { NextResponse } from "next/server";
 import { userOr401, permissionOr403, badRequest, notFound } from "@/lib/api";
 import { prisma } from "@/lib/db";
-import { startProjectRenderJob } from "@/server/render";
+import { listRenderJobs, startProjectRenderJob } from "@/server/render";
 import { startPickerRenderJob } from "@/server/picker-render";
 
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
   const auth = await userOr401();
   if ("response" in auth) return auth.response;
 
-  const jobs = await prisma.renderJob.findMany({
-    where: { projectId: params.id, project: { userId: auth.userId } },
-    orderBy: { createdAt: "desc" },
-    take: 20,
-  });
-  return NextResponse.json({
-    jobs: jobs.map((j) => ({
-      id: j.id,
-      status: j.status,
-      progress: j.progress,
-      error: j.error,
-      hasOutput: Boolean(j.outputPath),
-      createdAt: j.createdAt,
-    })),
-  });
+  const jobs = await listRenderJobs(auth.userId, { projectId: params.id });
+  return NextResponse.json({ jobs });
 }
 
 export async function POST(_req: Request, { params }: { params: { id: string } }) {

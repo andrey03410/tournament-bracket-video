@@ -69,7 +69,7 @@ MCP-инструменты `create_picker_project`/`add_round` принимаю�
 `add_tile`/`add_tile_from_shikimori` — `fitMode`.
 Стек: Next.js + Prisma (SQLite) + Auth.js + Remotion + ffmpeg-static +
 react-easy-crop. Запуск и инструкции — в [`README.md`](README.md). Доменная
-логика и сервисный слой покрыты тестами (`npm test`, 285 тестов, включая
+логика и сервисный слой покрыты тестами (`npm test`, 293 теста, включая
 интеграционные на реальной БД); ffmpeg-пайплайн, полный HTTP E2E (включая
 ролевой и проектный), UI-сценарии (headless Chrome) и headless-рендеры MP4
 (топ и пикер, кадры проверены) провалидированы — рецепт в

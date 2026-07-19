@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { userOr401, notFound, badRequest } from "@/lib/api";
 import { prisma } from "@/lib/db";
 import { deleteRenderJob } from "@/server/users";
+import { renderJobDto } from "@/lib/domain/render-jobs";
 
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
   const auth = await userOr401();
@@ -15,13 +16,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   });
   if (!job) return notFound();
 
-  return NextResponse.json({
-    id: job.id,
-    status: job.status,
-    progress: job.progress,
-    error: job.error,
-    downloadUrl: job.outputPath ? `/api/render-jobs/${job.id}/download` : null,
-  });
+  return NextResponse.json(renderJobDto(job));
 }
 
 export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
