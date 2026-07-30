@@ -65,6 +65,10 @@ interface ProjectDto {
   rounds: RoundDto[];
   invalidRounds: number[];
   tileOrientation: TileOrientation;
+  introEnabled: boolean;
+  introText: string | null;
+  outroEnabled: boolean;
+  outroText: string | null;
 }
 
 function roundOrientation(round: RoundDto, project: ProjectDto): TileOrientation {
@@ -369,6 +373,40 @@ export function PickerConstructor({
         </label>
         <div className="grid-2" style={{ marginTop: 12 }}>
           <div>
+            <label className="row" style={{ gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={project.introEnabled}
+                onChange={(e) => void patchProject({ introEnabled: e.target.checked })}
+              />
+              <span>Интро (титульный экран, 3 сек)</span>
+            </label>
+            <input
+              key={`intro-${project.introText ?? ""}`}
+              defaultValue={project.introText ?? ""}
+              placeholder={project.title}
+              onBlur={(e) => void patchProject({ introText: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="row" style={{ gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={project.outroEnabled}
+                onChange={(e) => void patchProject({ outroEnabled: e.target.checked })}
+              />
+              <span>Аутро (финальный экран, 3 сек)</span>
+            </label>
+            <input
+              key={`outro-${project.outroText ?? ""}`}
+              defaultValue={project.outroText ?? ""}
+              placeholder="Спасибо за просмотр"
+              onBlur={(e) => void patchProject({ outroText: e.target.value })}
+            />
+          </div>
+        </div>
+        <div className="grid-2" style={{ marginTop: 12 }}>
+          <div>
             <label>Задний фон (картинка или видео)</label>
             <MediaChip
               art={project.bgArt}
@@ -442,7 +480,10 @@ export function PickerConstructor({
           сменяются кроссфейдом, по окончании — луп); видео-блок со звуком
           играет свой звук во время показа, музыка на это время приглушается.
           Если у раунда задана своя музыка — на нём играет она, а плейлист
-          продолжается со следующего раунда.
+          продолжается со следующего раунда. Интро и аутро — титульные экраны по
+          3 секунды в начале и в конце видео (фоновая музыка на них продолжает
+          играть); пустой текст берётся из названия проекта / «Спасибо за
+          просмотр».
         </p>
         <button
           className="btn secondary"

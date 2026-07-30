@@ -43,5 +43,7 @@ export const DEFAULT_PICKER_PROPS: PickerCompositionProps = {
     durationInFrames: 90,
     rounds: [],
     music: null,
+    intro: null,
+    outro: null,
   },
 };

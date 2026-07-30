@@ -3,6 +3,7 @@ import {
   buildPickerPlan,
   buildMusicCues,
   ANSWER_SEC,
+  BOOKEND_SEC,
   MUSIC_FADE_SEC,
   PROMPT_INTRO_SEC,
   NO_PROMPT_INTRO_SEC,
@@ -260,6 +261,85 @@ describe("buildMusicCues / plan.music", () => {
   it("no playlist -> plan.music is null", () => {
     const plan = buildPickerPlan(DEFAULTS, [round([imageTile(), imageTile()])]);
     expect(plan.music).toBeNull();
+  });
+});
+
+describe("buildPickerPlan intro/outro cards", () => {
+  const BOOKENDS = { intro: { text: "Топ персонажей" }, outro: { text: "Спасибо" } };
+
+  it("no bookends by default: rounds still start at 0", () => {
+    const plan = buildPickerPlan(DEFAULTS, [round([imageTile(), imageTile()])]);
+    expect(plan.intro).toBeNull();
+    expect(plan.outro).toBeNull();
+    expect(plan.rounds[0].startSec).toBe(0);
+  });
+
+  it("intro shifts the whole timeline; outro extends the duration", () => {
+    const bare = buildPickerPlan(DEFAULTS, [
+      round([imageTile(), imageTile()]),
+      round([imageTile(), imageTile()]),
+    ]);
+    const plan = buildPickerPlan(
+      DEFAULTS,
+      [round([imageTile(), imageTile()]), round([imageTile(), imageTile()])],
+      [],
+      BOOKENDS,
+    );
+
+    expect(plan.intro).toEqual({ text: "Топ персонажей", fromSec: 0, durationSec: BOOKEND_SEC });
+    // every round (and every tile inside it) moves by the intro length
+    expect(plan.rounds[0].startSec).toBe(BOOKEND_SEC);
+    expect(plan.rounds[0].tiles[0].revealAtSec).toBeCloseTo(
+      bare.rounds[0].tiles[0].revealAtSec + BOOKEND_SEC,
+      9,
+    );
+    expect(plan.rounds[1].startSec).toBeCloseTo(bare.rounds[1].startSec + BOOKEND_SEC, 9);
+    // the outro sits right after the last round and closes the video
+    const lastEnd = plan.rounds[1].endSec;
+    expect(plan.outro).toEqual({ text: "Спасибо", fromSec: lastEnd, durationSec: BOOKEND_SEC });
+    expect(plan.durationSec).toBeCloseTo(lastEnd + BOOKEND_SEC, 9);
+    expect(plan.durationSec).toBeCloseTo(bare.durationSec + 2 * BOOKEND_SEC, 9);
+    expect(plan.durationInFrames).toBe(Math.round(plan.durationSec * plan.fps));
+  });
+
+  it("each card can be enabled on its own", () => {
+    const introOnly = buildPickerPlan(DEFAULTS, [round([imageTile(), imageTile()])], [], {
+      intro: { text: "Старт" },
+      outro: null,
+    });
+    expect(introOnly.intro!.text).toBe("Старт");
+    expect(introOnly.outro).toBeNull();
+    expect(introOnly.durationSec).toBeCloseTo(introOnly.rounds[0].endSec, 9);
+
+    const outroOnly = buildPickerPlan(DEFAULTS, [round([imageTile(), imageTile()])], [], {
+      intro: null,
+      outro: { text: "Конец" },
+    });
+    expect(outroOnly.intro).toBeNull();
+    expect(outroOnly.rounds[0].startSec).toBe(0);
+    expect(outroOnly.outro!.fromSec).toBeCloseTo(outroOnly.rounds[0].endSec, 9);
+  });
+
+  it("a project without renderable rounds gets no cards at all", () => {
+    const plan = buildPickerPlan(DEFAULTS, [round([])], [], BOOKENDS);
+    expect(plan.rounds).toEqual([]);
+    expect(plan.intro).toBeNull();
+    expect(plan.outro).toBeNull();
+    expect(plan.durationSec).toBe(1);
+  });
+
+  it("background music covers the cards too (no mute windows added)", () => {
+    const plan = buildPickerPlan(
+      DEFAULTS,
+      [round([imageTile(), imageTile()])],
+      [{ ref: "pl.mp3", durationSec: 30 }],
+      BOOKENDS,
+    );
+    const cues = plan.music!.cues;
+    expect(cues[0].fromSec).toBe(0); // starts on the title card
+    const last = cues[cues.length - 1];
+    expect(last.fromSec + last.durationSec).toBeGreaterThanOrEqual(plan.durationSec);
+    expect(plan.music!.muteWindows).toEqual([]);
   });
 });
 

@@ -1,10 +1,13 @@
-import type { LoadedProject } from "@/server/projects";
+import { OUTRO_FALLBACK, type LoadedProject } from "@/server/projects";
 
 export interface ProjectSummary {
   id: string;
   title: string;
   kind: string;
   url: string;
+  /** Title / final card texts; null = the card is off. */
+  intro: string | null;
+  outro: string | null;
   playlist: { artId: string; label: string | null }[];
   rounds: {
     id: string;
@@ -21,6 +24,8 @@ export function projectSummary(p: LoadedProject): ProjectSummary {
     title: p.title,
     kind: p.kind,
     url: `/projects/${p.id}`,
+    intro: p.introEnabled ? p.introText?.trim() || p.title : null,
+    outro: p.outroEnabled ? p.outroText?.trim() || OUTRO_FALLBACK : null,
     playlist: p.playlist.map((pl) => ({ artId: pl.artId, label: pl.art.label })),
     rounds: p.rounds.map((r) => ({
       id: r.id,

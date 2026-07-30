@@ -66,10 +66,16 @@ aandrew-me/ytdownloader), фоновые DownloadJob с прогрессом/о�
 сетка «Ростер» 2:3 для 2–9 плиток (по одному ряду до 6, затем 4+3/4+4/5+4),
 потайловый режим вписывания cover/fill/contain (обрезка/растянуть/вписать),
 MCP-инструменты `create_picker_project`/`add_round` принимают `orientation`,
-`add_tile`/`add_tile_from_shikimori` — `fitMode`.
+`add_tile`/`add_tile_from_shikimori` — `fitMode`, Фаза 12 — интро и аутро
+пикера: титульный и финальный экраны по 3 сек (общий `TitleCard` с топами),
+поля `introEnabled/introText/outroEnabled/outroText` на `VideoProject`, тексты
+по умолчанию — название проекта и «Спасибо за просмотр», музыка играет и на
+титрах; дефолт БД выключен (старые пикеры не меняют таймлайн), новые проекты
+создаются с включёнными экранами, MCP `create_picker_project` принимает
+`introText`/`outroText`.
 Стек: Next.js + Prisma (SQLite) + Auth.js + Remotion + ffmpeg-static +
 react-easy-crop. Запуск и инструкции — в [`README.md`](README.md). Доменная
-логика и сервисный слой покрыты тестами (`npm test`, 293 теста, включая
+логика и сервисный слой покрыты тестами (`npm test`, 301 тест, включая
 интеграционные на реальной БД); ffmpeg-пайплайн, полный HTTP E2E (включая
 ролевой и проектный), UI-сценарии (headless Chrome) и headless-рендеры MP4
 (топ и пикер, кадры проверены) провалидированы — рецепт в

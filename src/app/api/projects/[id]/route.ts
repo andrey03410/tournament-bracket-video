@@ -15,6 +15,8 @@ const ERRORS: Record<string, string> = {
   BAD_TIMER: "Время таймера: от 1 до 60 секунд",
   BAD_BG: "Фоном может быть картинка или видео из пула",
   BAD_MUSIC: "Фоновой музыкой может быть аудио из пула",
+  BAD_ORIENTATION: "Ориентация блоков: горизонтальная или вертикальная",
+  BAD_BOOKEND_TEXT: "Текст интро/аутро: не больше 120 символов",
 };
 
 function artDto(a: LoadedProject["bgArt"]) {
@@ -44,6 +46,10 @@ function serialize(p: LoadedProject) {
     // effective playlist (legacy single bgMusicArt shows up as one item)
     playlist: effectivePlaylist(p).map((a) => artDto(a)),
     tileOrientation: p.tileOrientation,
+    introEnabled: p.introEnabled,
+    introText: p.introText,
+    outroEnabled: p.outroEnabled,
+    outroText: p.outroText,
     rounds: p.rounds.map((r) => ({
       id: r.id,
       order: r.order,

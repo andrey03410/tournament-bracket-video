@@ -25,6 +25,7 @@ import {
   reorderTopItems,
 } from "@/server/projects";
 import { buildPickerPreviewPlan, invalidRounds } from "@/server/picker-render";
+import { BOOKEND_SEC } from "@/lib/domain/picker-plan";
 import { effectivePlaylist, setPlaylist } from "@/server/projects";
 import { buildPreviewPlan, getProjectRenderConfig } from "@/server/render";
 
@@ -356,6 +357,66 @@ describe("background-music playlist", () => {
     // global ducks come only from the non-override round
     expect(music.duckWindows).toEqual(plan.rounds[0].duckWindows);
     expect(music.duckWindows).toHaveLength(1);
+    await deleteProject(userId, p.id);
+  });
+});
+
+describe("phase 12: picker intro/outro", () => {
+  it("a fresh picker gets both cards on, with the title as the intro text", async () => {
+    const p = await createProject(userId, "Пикер с интро", "picker");
+    expect(p.introEnabled).toBe(true);
+    expect(p.introText).toBe("Пикер с интро");
+    expect(p.outroEnabled).toBe(true);
+    expect(p.outroText).toBe("Спасибо за просмотр");
+    await deleteProject(userId, p.id);
+  });
+
+  it("patchProject toggles the cards, trims texts and rejects overlong ones", async () => {
+    const p = await createProject(userId, "Тексты", "picker");
+    await patchProject(userId, p.id, {
+      introEnabled: false,
+      introText: "  Наш топ  ",
+      outroText: "   ", // blank -> null (falls back to the default line)
+    });
+    let loaded = await getProject(userId, p.id);
+    expect(loaded!.introEnabled).toBe(false);
+    expect(loaded!.introText).toBe("Наш топ");
+    expect(loaded!.outroText).toBeNull();
+
+    await expect(
+      patchProject(userId, p.id, { introText: "я".repeat(121) }),
+    ).rejects.toThrow("BAD_BOOKEND_TEXT");
+
+    await patchProject(userId, p.id, { introEnabled: true, outroEnabled: false });
+    loaded = await getProject(userId, p.id);
+    expect(loaded!.introEnabled).toBe(true);
+    expect(loaded!.outroEnabled).toBe(false);
+    await deleteProject(userId, p.id);
+  });
+
+  it("preview plan carries the cards and shifts the rounds by the intro", async () => {
+    const p = await createProject(userId, "План с интро", "picker");
+    await patchProject(userId, p.id, { revealSec: 2, timerSec: 3, introText: null });
+    const round = (await getProject(userId, p.id))!.rounds[0];
+    await addTile(userId, round.id, imageArtId);
+    await addTile(userId, round.id, imageArtId);
+
+    const plan = buildPickerPreviewPlan((await getProject(userId, p.id))!);
+    expect(plan.intro).toEqual({ text: "План с интро", fromSec: 0, durationSec: BOOKEND_SEC });
+    expect(plan.rounds[0].startSec).toBe(BOOKEND_SEC);
+    expect(plan.outro).toEqual({
+      text: "Спасибо за просмотр",
+      fromSec: plan.rounds[0].endSec,
+      durationSec: BOOKEND_SEC,
+    });
+    expect(plan.durationSec).toBeCloseTo(plan.rounds[0].endSec + BOOKEND_SEC, 9);
+
+    // switching both off restores the plain timeline
+    await patchProject(userId, p.id, { introEnabled: false, outroEnabled: false });
+    const plain = buildPickerPreviewPlan((await getProject(userId, p.id))!);
+    expect(plain.intro).toBeNull();
+    expect(plain.outro).toBeNull();
+    expect(plain.rounds[0].startSec).toBe(0);
     await deleteProject(userId, p.id);
   });
 });

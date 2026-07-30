@@ -16,7 +16,11 @@ const LIMITS = {
   revealSec: { min: 1, max: 60 },
   timerSec: { min: 1, max: 60 },
   maxRounds: 50,
+  bookendTextLen: 120,
 };
+
+/** Default final-card text of a freshly created project (top or picker). */
+export const OUTRO_FALLBACK = "Спасибо за просмотр";
 
 const ORIENTATIONS = ["landscape", "portrait"] as const;
 const FIT_MODES = ["cover", "fill", "contain"] as const;
@@ -32,11 +36,21 @@ export async function createProject(userId: string, title: string, kind: string)
   });
   if (kind === "top") {
     await prisma.renderConfig.create({
-      data: { projectId: project.id, introText: name, outroText: "Спасибо за просмотр" },
+      data: { projectId: project.id, introText: name, outroText: OUTRO_FALLBACK },
     });
   } else {
-    // A picker starts with one empty round so the constructor has something to show.
+    // A picker starts with one empty round so the constructor has something to show,
+    // and with bookends on (the DB default is off to keep older pickers untouched).
     await prisma.pickerRound.create({ data: { projectId: project.id, order: 0 } });
+    return prisma.videoProject.update({
+      where: { id: project.id },
+      data: {
+        introEnabled: true,
+        introText: name,
+        outroEnabled: true,
+        outroText: OUTRO_FALLBACK,
+      },
+    });
   }
   return project;
 }
@@ -126,6 +140,18 @@ export interface ProjectPatch {
   bgArtId?: unknown; // image|video art id, or null to clear
   bgMusicArtId?: unknown; // audio art id, or null to clear
   tileOrientation?: unknown;
+  introEnabled?: boolean;
+  introText?: string | null;
+  outroEnabled?: boolean;
+  outroText?: string | null;
+}
+
+/** Bookend text: trimmed, blank -> null (the card falls back to a default). */
+function bookendText(value: string | null | undefined): string | null {
+  if (value == null) return null;
+  const text = String(value).trim();
+  if (text.length > LIMITS.bookendTextLen) throw new Error("BAD_BOOKEND_TEXT");
+  return text || null;
 }
 
 export async function patchProject(userId: string, id: string, patch: ProjectPatch) {
@@ -147,6 +173,10 @@ export async function patchProject(userId: string, id: string, patch: ProjectPat
   }
   if (patch.hideAfterReveal !== undefined) data.hideAfterReveal = Boolean(patch.hideAfterReveal);
   if (patch.tickSound !== undefined) data.tickSound = Boolean(patch.tickSound);
+  if (patch.introEnabled !== undefined) data.introEnabled = Boolean(patch.introEnabled);
+  if (patch.outroEnabled !== undefined) data.outroEnabled = Boolean(patch.outroEnabled);
+  if (patch.introText !== undefined) data.introText = bookendText(patch.introText);
+  if (patch.outroText !== undefined) data.outroText = bookendText(patch.outroText);
   if (patch.bgArtId !== undefined) {
     data.bgArtId = await resolveArtRef(userId, patch.bgArtId, ["image", "video"], "BAD_BG");
   }

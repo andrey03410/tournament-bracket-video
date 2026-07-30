@@ -4,6 +4,7 @@ import type { LoadedProject } from "@/server/projects";
 
 const fake = {
   id: "p1", title: "Персонажи Madhouse", kind: "picker",
+  introEnabled: true, introText: null, outroEnabled: false, outroText: "Пока",
   playlist: [{ artId: "a9", art: { label: "OST" } }],
   rounds: [
     { id: "r1", order: 0, prompt: "Кто главный?",
@@ -19,6 +20,8 @@ describe("projectSummary", () => {
     const s = projectSummary(fake);
     expect(s).toEqual({
       id: "p1", title: "Персонажи Madhouse", kind: "picker", url: "/projects/p1",
+      // blank intro text falls back to the title; a disabled card reads as null
+      intro: "Персонажи Madhouse", outro: null,
       playlist: [{ artId: "a9", label: "OST" }],
       rounds: [
         { id: "r1", order: 0, prompt: "Кто главный?",

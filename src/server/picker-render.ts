@@ -9,13 +9,14 @@ import { cropFromColumns, type FitMode } from "@/lib/domain/art-crop";
 import { effectiveOrientation, type TileOrientation } from "@/lib/domain/picker-layout";
 import {
   buildPickerPlan,
+  type BookendsInput,
   type LabelsMode,
   type PickerDefaults,
   type PlanRoundInput,
   type PlanTileInput,
 } from "@/lib/domain/picker-plan";
 import { describeRenderError } from "@/server/render";
-import { effectivePlaylist, type LoadedProject } from "@/server/projects";
+import { effectivePlaylist, OUTRO_FALLBACK, type LoadedProject } from "@/server/projects";
 
 // Picker preview plan + headless render pipeline (mirrors render.ts for tops).
 
@@ -41,6 +42,27 @@ function defaults(project: LoadedProject): PickerDefaults {
     hideAfterReveal: project.hideAfterReveal,
     timerSec: project.timerSec,
     tickSound: project.tickSound,
+  };
+}
+
+/**
+ * Intro / outro cards of the project: blank texts fall back to the project
+ * title (intro) and the standard closing line (outro).
+ */
+export function bookends(project: {
+  title: string;
+  introEnabled: boolean;
+  introText: string | null;
+  outroEnabled: boolean;
+  outroText: string | null;
+}): BookendsInput {
+  return {
+    intro: project.introEnabled
+      ? { text: project.introText?.trim() || project.title }
+      : null,
+    outro: project.outroEnabled
+      ? { text: project.outroText?.trim() || OUTRO_FALLBACK }
+      : null,
   };
 }
 
@@ -105,7 +127,7 @@ export function buildPickerPreviewPlan(project: LoadedProject) {
     ref: `/api/arts/${a.id}`,
     durationSec: a.durationSec,
   }));
-  return buildPickerPlan(defaults(project), rounds, playlist);
+  return buildPickerPlan(defaults(project), rounds, playlist, bookends(project));
 }
 
 /** Rounds must have 2..9 tiles to be renderable; returns 1-based bad indexes. */
@@ -322,6 +344,7 @@ async function runPickerRender(jobId: string): Promise<void> {
     defaults(project as LoadedProject),
     roundInputs,
     playlistTracks,
+    bookends(project),
   );
   // Swap each sounded tile's audio ref to its pre-clipped AAC.
   for (const r of plan.rounds) {

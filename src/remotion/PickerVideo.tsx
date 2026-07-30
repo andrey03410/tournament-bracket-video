@@ -12,6 +12,7 @@ import {
   useVideoConfig,
 } from "remotion";
 import { artCropStyle } from "@/lib/domain/art-crop";
+import { TitleCard } from "./TitleCard";
 import {
   ROUND_GAP_SEC,
   type PickerPlan,
@@ -439,6 +440,17 @@ export const PickerVideo: React.FC<PickerVideoProps> = ({ plan, assetMode, tickS
   return (
     <AbsoluteFill style={{ backgroundColor: BG }}>
       {plan.music ? <PlaylistAudio music={plan.music} mode={assetMode} /> : null}
+
+      {/* Title card before the first round (background music keeps playing) */}
+      {plan.intro ? (
+        <Sequence
+          from={sec(plan.intro.fromSec, fps)}
+          durationInFrames={Math.max(1, sec(plan.intro.durationSec, fps))}
+        >
+          <TitleCard title={plan.intro.text} />
+        </Sequence>
+      ) : null}
+
       {plan.rounds.map((round) => (
         <Sequence
           key={round.index}
@@ -452,6 +464,16 @@ export const PickerVideo: React.FC<PickerVideoProps> = ({ plan, assetMode, tickS
           />
         </Sequence>
       ))}
+
+      {/* Final card after the last round */}
+      {plan.outro ? (
+        <Sequence
+          from={sec(plan.outro.fromSec, fps)}
+          durationInFrames={Math.max(1, sec(plan.outro.durationSec, fps))}
+        >
+          <TitleCard title={plan.outro.text} />
+        </Sequence>
+      ) : null}
     </AbsoluteFill>
   );
 };

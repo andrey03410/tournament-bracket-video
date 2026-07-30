@@ -13,6 +13,7 @@ import {
 } from "remotion";
 import type { PlanSegment, SegmentVisual } from "@/lib/domain/video-plan";
 import { artCropStyle } from "@/lib/domain/art-crop";
+import { TitleCard } from "./TitleCard";
 import type { AssetMode, TopVideoProps } from "./types";
 
 const BG = "#0b0d12";
@@ -24,32 +25,6 @@ function resolve(mode: AssetMode, p: string | null): string | null {
   if (!p) return null;
   return mode === "static" ? staticFile(p) : p;
 }
-
-const Card: React.FC<{ title: string; subtitle?: string | null }> = ({
-  title,
-  subtitle,
-}) => {
-  const frame = useCurrentFrame();
-  const opacity = interpolate(frame, [0, 15], [0, 1], { extrapolateRight: "clamp" });
-  return (
-    <AbsoluteFill
-      style={{
-        backgroundColor: BG,
-        justifyContent: "center",
-        alignItems: "center",
-        fontFamily: FONT,
-        opacity,
-      }}
-    >
-      <div style={{ color: "white", fontSize: 96, fontWeight: 800, textAlign: "center" }}>
-        {title}
-      </div>
-      {subtitle ? (
-        <div style={{ color: ACCENT, fontSize: 40, marginTop: 24 }}>{subtitle}</div>
-      ) : null}
-    </AbsoluteFill>
-  );
-};
 
 /** The segment's background visual: image, (looping) muted video, or #N placeholder. */
 const VisualView: React.FC<{ visual: SegmentVisual; rank: number; mode: AssetMode }> = ({
@@ -194,7 +169,7 @@ export const TopVideo: React.FC<TopVideoProps> = ({ plan, assetMode }) => {
     <AbsoluteFill style={{ backgroundColor: BG }}>
       {plan.introFrames > 0 ? (
         <Sequence durationInFrames={plan.introFrames}>
-          <Card title={plan.introText ?? "Top"} />
+          <TitleCard title={plan.introText ?? "Top"} />
         </Sequence>
       ) : null}
 
@@ -213,7 +188,7 @@ export const TopVideo: React.FC<TopVideoProps> = ({ plan, assetMode }) => {
           from={plan.durationInFrames - plan.outroFrames}
           durationInFrames={plan.outroFrames}
         >
-          <Card title={plan.outroText ?? "The End"} />
+          <TitleCard title={plan.outroText ?? "The End"} />
         </Sequence>
       ) : null}
     </AbsoluteFill>

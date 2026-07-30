@@ -16,6 +16,7 @@ export const NO_PROMPT_INTRO_SEC = 0.5;
 export const ANSWER_SEC = 2.5; // answer-highlight phase
 export const ROUND_GAP_SEC = 0.7; // dark gap between rounds
 export const MUSIC_FADE_SEC = 1; // playlist crossfade (and loop) length
+export const BOOKEND_SEC = 3; // title / final card length (same as tops)
 
 export type LabelsMode = "always" | "finale" | "never";
 
@@ -150,6 +151,19 @@ export interface PlanRound {
   } | null;
 }
 
+/** Title / final card: text with a length, laid at the very start / very end. */
+export interface PlanBookend {
+  text: string;
+  fromSec: number;
+  durationSec: number;
+}
+
+/** Bookend request: text (already resolved to a non-empty string) or null = off. */
+export interface BookendsInput {
+  intro: { text: string } | null;
+  outro: { text: string } | null;
+}
+
 export interface PickerPlan {
   fps: number;
   width: number;
@@ -159,14 +173,25 @@ export interface PickerPlan {
   rounds: PlanRound[];
   /** Continuous background playlist; null when the project has none. */
   music: PlanMusic | null;
+  /** Title card before the first round; null when disabled. */
+  intro: PlanBookend | null;
+  /** Final card after the last round; null when disabled. */
+  outro: PlanBookend | null;
 }
 
 export function buildPickerPlan(
   defaults: PickerDefaults,
   rounds: PlanRoundInput[],
   playlist: MusicTrackInput[] = [],
+  bookends: BookendsInput = { intro: null, outro: null },
 ): PickerPlan {
-  let cursor = 0;
+  // Bookends only make sense around real content: a project with no renderable
+  // round stays an empty timeline (the constructor shows a hint instead).
+  const hasContent = rounds.some((r) => r.tiles.length > 0);
+  const introSec = hasContent && bookends.intro ? BOOKEND_SEC : 0;
+  const outroSec = hasContent && bookends.outro ? BOOKEND_SEC : 0;
+
+  let cursor = introSec;
   const planRounds: PlanRound[] = [];
 
   rounds.forEach((round, index) => {
@@ -254,7 +279,7 @@ export function buildPickerPlan(
     cursor = endSec;
   });
 
-  const durationSec = Math.max(cursor, 1);
+  const durationSec = Math.max(cursor + outroSec, 1);
 
   let music: PlanMusic | null = null;
   if (playlist.length > 0) {
@@ -278,5 +303,13 @@ export function buildPickerPlan(
     durationInFrames: Math.round(durationSec * FPS),
     rounds: planRounds,
     music,
+    intro:
+      introSec > 0
+        ? { text: bookends.intro!.text, fromSec: 0, durationSec: introSec }
+        : null,
+    outro:
+      outroSec > 0
+        ? { text: bookends.outro!.text, fromSec: cursor, durationSec: outroSec }
+        : null,
   };
 }

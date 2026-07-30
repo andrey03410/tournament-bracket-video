@@ -82,12 +82,25 @@ async function main() {
   // ---- Picker building ----
   server.registerTool(
     "create_picker_project",
-    { description: "Создать проект «Пикер». Стартует с одним пустым раундом (firstRoundId). → {projectId, firstRoundId}",
-      inputSchema: { title: z.string(), orientation: z.enum(["landscape", "portrait"]).optional() } },
-    ({ title, orientation }) => guard(async () => {
+    { description: "Создать проект «Пикер». Стартует с одним пустым раундом (firstRoundId) и включёнными интро/аутро (титульный и финальный экраны по 3 сек). Пустая строка в introText/outroText выключает экран. → {projectId, firstRoundId}",
+      inputSchema: {
+        title: z.string(),
+        orientation: z.enum(["landscape", "portrait"]).optional(),
+        introText: z.string().optional(),
+        outroText: z.string().optional(),
+      } },
+    ({ title, orientation, introText, outroText }) => guard(async () => {
       const project = await createProject(uid, title, "picker");
-      if (orientation != null) {
-        await patchProject(uid, project.id, { tileOrientation: orientation });
+      if (orientation != null || introText !== undefined || outroText !== undefined) {
+        await patchProject(uid, project.id, {
+          ...(orientation != null ? { tileOrientation: orientation } : {}),
+          ...(introText !== undefined
+            ? { introText, introEnabled: introText.trim() !== "" }
+            : {}),
+          ...(outroText !== undefined
+            ? { outroText, outroEnabled: outroText.trim() !== "" }
+            : {}),
+        });
       }
       const loaded = await getProject(uid, project.id);
       return { projectId: project.id, firstRoundId: loaded!.rounds[0]?.id ?? null };

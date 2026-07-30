@@ -124,6 +124,8 @@ describe("MCP server end-to-end (Madhouse scenario)", () => {
     const { projectId, firstRoundId } = await call("create_picker_project", {
       title: "Персонажи Madhouse",
       orientation: "portrait",
+      introText: "Угадай персонажа Madhouse",
+      outroText: "", // empty = no final card
     });
     expect(projectId).toMatch(/.+/);
 
@@ -152,6 +154,8 @@ describe("MCP server end-to-end (Madhouse scenario)", () => {
     });
 
     const summary = await call("get_project", { projectId });
+    expect(summary.intro).toBe("Угадай персонажа Madhouse");
+    expect(summary.outro).toBeNull();
     expect(summary.rounds).toHaveLength(2);
     expect(summary.rounds[0].tiles).toHaveLength(2);
     expect(summary.rounds[0].tiles.filter((t: { isAnswer: boolean }) => t.isAnswer)).toHaveLength(1);

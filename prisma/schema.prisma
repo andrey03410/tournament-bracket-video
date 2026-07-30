@@ -112,6 +112,14 @@ model VideoProject {
   // "landscape" | "portrait" — default tile orientation; rounds inherit unless overridden.
   tileOrientation String  @default("landscape")
 
+  // Picker bookends (title/final cards, same idea as RenderConfig.intro*/outro*
+  // for tops). Off by default so existing pickers keep their exact timeline;
+  // freshly created pickers get them switched on with texts.
+  introEnabled Boolean @default(false)
+  introText    String?
+  outroEnabled Boolean @default(false)
+  outroText    String?
+
   rounds       PickerRound[]
   playlist     PickerPlaylistItem[]
   renderConfig RenderConfig?
