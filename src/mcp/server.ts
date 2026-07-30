@@ -3,7 +3,11 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { resolveActor, type Actor } from "@/mcp/actor";
 import { can, quotasFor } from "@/lib/domain/permissions";
-import { search, findStudio, studioAnimes, animeCharacters, importPoster } from "@/server/shikimori";
+import {
+  search, findStudio, studioAnimes, animeCharacters, importPoster,
+  findUser, userAnimeList, userFavourites,
+} from "@/server/shikimori";
+import { USER_RATE_STATUSES } from "@/lib/domain/shikimori";
 import {
   createProject, getProject, addRound, patchRound, deleteRound, addTile, patchTile, patchProject, setPlaylist,
 } from "@/server/projects";
@@ -53,6 +57,39 @@ async function main() {
     { description: "Персонажи аниме (по умолчанию только Main). → [{id, type:'character', label, posterPath}]",
       inputSchema: { animeId: z.number(), role: z.enum(["Main", "all"]).optional() } },
     ({ animeId, role }) => guard(() => animeCharacters(animeId, { role })),
+  );
+  server.registerTool(
+    "shikimori_find_user",
+    { description: "Найти пользователя Shikimori по нику (или по числовому id). → {id, nickname, url, avatarUrl}",
+      inputSchema: { user: z.string() } },
+    ({ user }) => guard(() => findUser(user)),
+  );
+  server.registerTool(
+    "shikimori_user_anime_list",
+    { description:
+        "Список аниме пользователя с ЕГО оценками и статусами. status: planned (запланировано), " +
+        "watching (смотрю), rewatching (пересматриваю), completed (просмотрено), on_hold (отложено), " +
+        "dropped (брошено), all (весь список, по умолчанию). minScore отсекает по оценке юзера " +
+        "(0 = без фильтра), order: score (по оценке, по умолчанию) | updated (по дате изменения) | name. " +
+        "Список берётся целиком, поэтому сортировка/фильтр честные по всему списку; limit ≤ 500 (по умолчанию 50). " +
+        "У записей с kind='music'/'pv'/'cm' персонажей нет — для сценария «персонажи из просмотренного» " +
+        "бери kind tv/movie/ova/ona/special. " +
+        "→ {user, total, countsByStatus, matched, items:[{id, type:'anime', label, kind, posterPath, facts, userScore, status, episodes, rewatches, updatedAt}]}",
+      inputSchema: {
+        user: z.string(),
+        status: z.enum([...USER_RATE_STATUSES, "all"]).optional(),
+        minScore: z.number().optional(),
+        order: z.enum(["score", "updated", "name"]).optional(),
+        limit: z.number().optional(),
+      } },
+    ({ user, status, minScore, order, limit }) =>
+      guard(() => userAnimeList(user, { status, minScore, order, limit })),
+  );
+  server.registerTool(
+    "shikimori_user_favourites",
+    { description: "Избранное пользователя: аниме и персонажи (posterPath готов для import_shikimori_poster). → {user, animes:[...], characters:[...]}",
+      inputSchema: { user: z.string() } },
+    ({ user }) => guard(() => userFavourites(user)),
   );
   server.registerTool(
     "shikimori_search",

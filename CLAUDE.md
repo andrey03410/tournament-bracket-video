@@ -72,10 +72,17 @@ MCP-инструменты `create_picker_project`/`add_round` принимаю�
 по умолчанию — название проекта и «Спасибо за просмотр», музыка играет и на
 титрах; дефолт БД выключен (старые пикеры не меняют таймлайн), новые проекты
 создаются с включёнными экранами, MCP `create_picker_project` принимает
-`introText`/`outroText`.
+`introText`/`outroText`, Фаза 13 — данные пользователя Shikimori в MCP:
+`shikimori_find_user` (ник или id), `shikimori_user_anime_list` (его оценки и
+статусы planned/watching/rewatching/completed/on_hold/dropped, фильтры по
+статусу и минимальной оценке, порядок score/updated/name, сводка
+`countsByStatus`, список берётся одним запросом — сортировка честная по всему
+списку), `shikimori_user_favourites` (аниме и персонажи; `x64`-миниатюра
+переписывается в путь постера); записи без арта отдают `posterPath: null`,
+запросы к Shikimori сериализуются с паузой и повторяются при 429.
 Стек: Next.js + Prisma (SQLite) + Auth.js + Remotion + ffmpeg-static +
 react-easy-crop. Запуск и инструкции — в [`README.md`](README.md). Доменная
-логика и сервисный слой покрыты тестами (`npm test`, 301 тест, включая
+логика и сервисный слой покрыты тестами (`npm test`, 325 тестов, включая
 интеграционные на реальной БД); ffmpeg-пайплайн, полный HTTP E2E (включая
 ролевой и проектный), UI-сценарии (headless Chrome) и headless-рендеры MP4
 (топ и пикер, кадры проверены) провалидированы — рецепт в

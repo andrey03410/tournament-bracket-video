@@ -34,8 +34,14 @@ interface RawHit {
 }
 
 const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v : null);
+
+/**
+ * Poster/preview path of a hit, normalized to the requested size bucket.
+ * Titles without artwork come back as `/assets/globals/missing_original.jpg`,
+ * which is not fetchable — those become null so callers skip them.
+ */
 const imgPath = (img: RawImage | undefined, key: "original" | "preview"): string | null =>
-  img && typeof img[key] === "string" ? (img[key] as string) : null;
+  resizeImagePath(img?.[key] as string | undefined, key);
 
 export function mapAnimeResult(raw: unknown): AnimeResult | null {
   const h = raw as RawHit;
@@ -83,6 +89,171 @@ export function isSafeImagePath(path: string): boolean {
   return /^\/system\/(animes|characters)\/(original|preview)\/\d+\.(jpe?g|png|webp)(\?\S*)?$/.test(
     path,
   );
+}
+
+/**
+ * Rewrite a /system image path to another size bucket. Favourites come with an
+ * `x64` thumb only, while imports need `original` — the id and query suffix
+ * (cache buster) are preserved. Returns null for anything unrecognized.
+ */
+export function resizeImagePath(
+  path: string | null | undefined,
+  size: "original" | "preview",
+): string | null {
+  if (typeof path !== "string") return null;
+  const m = /^\/system\/(animes|characters)\/[^/]+\/(\d+\.(?:jpe?g|png|webp))(\?\S*)?$/.exec(path);
+  return m ? `/system/${m[1]}/${size}/${m[2]}${m[3] ?? ""}` : null;
+}
+
+// ---- User profile, list & favourites ----
+
+export const USER_RATE_STATUSES = [
+  "planned",
+  "watching",
+  "rewatching",
+  "completed",
+  "on_hold",
+  "dropped",
+] as const;
+export type UserRateStatus = (typeof USER_RATE_STATUSES)[number];
+
+export interface ShikimoriUser {
+  id: number;
+  nickname: string;
+  url: string | null;
+  avatarUrl: string | null;
+}
+
+export function mapUser(raw: unknown): ShikimoriUser | null {
+  const u = raw as { id?: unknown; nickname?: unknown; url?: unknown; avatar?: unknown };
+  if (typeof u?.id !== "number" || typeof u?.nickname !== "string") return null;
+  return {
+    id: u.id,
+    nickname: u.nickname,
+    url: str(u.url),
+    avatarUrl: str(u.avatar),
+  };
+}
+
+/** One entry of a user's anime list: the anime plus that user's own rate. */
+export interface UserRate {
+  anime: AnimeResult;
+  /** The user's own score 1..10; null when unrated (the API sends 0). */
+  score: number | null;
+  status: UserRateStatus;
+  episodes: number;
+  rewatches: number;
+  updatedAt: string | null;
+}
+
+const isStatus = (v: unknown): v is UserRateStatus =>
+  typeof v === "string" && (USER_RATE_STATUSES as readonly string[]).includes(v);
+
+const num = (v: unknown): number => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
+export function mapUserRate(raw: unknown): UserRate | null {
+  const r = raw as {
+    anime?: unknown;
+    score?: unknown;
+    status?: unknown;
+    episodes?: unknown;
+    rewatches?: unknown;
+    updated_at?: unknown;
+  };
+  const anime = mapAnimeResult(r?.anime);
+  if (!anime || !isStatus(r?.status)) return null; // manga rates and junk drop out
+  const score = num(r.score);
+  return {
+    anime,
+    score: score > 0 ? score : null,
+    status: r.status,
+    episodes: num(r.episodes),
+    rewatches: num(r.rewatches),
+    updatedAt: str(r.updated_at),
+  };
+}
+
+export type UserRateOrder = "score" | "updated" | "name";
+
+export interface UserRateQuery {
+  /** Single status, or "all"/undefined for the whole list. */
+  status?: UserRateStatus | "all";
+  /** Keep only entries rated at least this high (unrated ones drop out). */
+  minScore?: number;
+  order?: UserRateOrder;
+  limit?: number;
+}
+
+/** How many entries the list has per status (all statuses present as keys). */
+export function countByStatus(rates: UserRate[]): Record<UserRateStatus, number> {
+  const counts = Object.fromEntries(USER_RATE_STATUSES.map((s) => [s, 0])) as Record<
+    UserRateStatus,
+    number
+  >;
+  for (const r of rates) counts[r.status]++;
+  return counts;
+}
+
+const label = (r: UserRate) => pickLabel(r.anime.russian, r.anime.name) ?? "";
+const byUpdatedDesc = (a: UserRate, b: UserRate) =>
+  (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "");
+
+/** Filter + order + cut a user's list. Pure: the network part stays outside. */
+export function selectUserRates(rates: UserRate[], query: UserRateQuery = {}): UserRate[] {
+  const status = query.status && query.status !== "all" ? query.status : null;
+  const minScore = query.minScore ?? 0;
+  const out = rates.filter(
+    (r) => (!status || r.status === status) && (r.score ?? 0) >= minScore,
+  );
+
+  const order = query.order ?? "score";
+  out.sort((a, b) => {
+    if (order === "name") return label(a).localeCompare(label(b), "ru");
+    if (order === "updated") return byUpdatedDesc(a, b);
+    // score: best first, unrated last, ties by freshness
+    const diff = (b.score ?? 0) - (a.score ?? 0);
+    return diff !== 0 ? diff : byUpdatedDesc(a, b);
+  });
+
+  return query.limit != null ? out.slice(0, Math.max(0, query.limit)) : out;
+}
+
+/** A favourites entry: same fields for animes and characters. */
+export interface FavouriteItem {
+  id: number;
+  name: string;
+  russian: string | null;
+  posterPath: string | null;
+  previewPath: string | null;
+}
+
+export interface Favourites {
+  animes: FavouriteItem[];
+  characters: FavouriteItem[];
+}
+
+function mapFavourite(raw: unknown): FavouriteItem | null {
+  const f = raw as { id?: unknown; name?: unknown; russian?: unknown; image?: unknown };
+  if (typeof f?.id !== "number" || typeof f?.name !== "string") return null;
+  return {
+    id: f.id,
+    name: f.name,
+    russian: str(f.russian),
+    // favourites carry only an x64 thumb path -> rewrite to the real poster
+    posterPath: resizeImagePath(f.image as string, "original"),
+    previewPath: resizeImagePath(f.image as string, "preview"),
+  };
+}
+
+/** Pull animes and characters out of a /users/:id/favourites response. */
+export function extractFavourites(raw: unknown): Favourites {
+  const f = raw as { animes?: unknown; characters?: unknown };
+  const list = (v: unknown) =>
+    (Array.isArray(v) ? v : []).map(mapFavourite).filter((x): x is FavouriteItem => x != null);
+  return { animes: list(f?.animes), characters: list(f?.characters) };
 }
 
 export interface StudioResult {

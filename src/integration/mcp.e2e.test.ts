@@ -43,9 +43,47 @@ async function call(name: string, args: Record<string, unknown>) {
   return data;
 }
 
+// Fake Shikimori profile: two rated animes (one of them Death Note, whose
+// characters the roles route below serves) plus favourites.
+const PROFILE = { id: 1270120, nickname: "andrey03410", url: "https://shikimori.io/andrey03410", avatar: null };
+const RATES = [
+  { id: 1, score: 10, status: "completed", episodes: 37, rewatches: 0, updated_at: "2026-01-05T10:00:00+03:00",
+    anime: { id: 1535, name: "Death Note", russian: "Тетрадь смерти", kind: "tv", score: "8.62", aired_on: "2006-10-04",
+      image: { original: "/system/animes/original/1535.jpg", preview: "/system/animes/preview/1535.jpg" } }, manga: null },
+  { id: 2, score: 5, status: "dropped", episodes: 2, rewatches: 0, updated_at: "2026-02-05T10:00:00+03:00",
+    anime: { id: 20, name: "Naruto", russian: "Наруто", kind: "tv", score: "8.02", aired_on: "2002-10-03",
+      image: { original: "/system/animes/original/20.jpg", preview: "/system/animes/preview/20.jpg" } }, manga: null },
+];
+const FAVOURITES = {
+  animes: [{ id: 1535, name: "Death Note", russian: "Тетрадь смерти", image: "/system/animes/x64/1535.jpg", url: null }],
+  characters: [{ id: 17, name: "Light", russian: "Лайт", image: "/system/characters/x64/17.jpg", url: null }],
+  mangas: [], ranobe: [], people: [],
+};
+
 beforeAll(async () => {
   shiki = createServer((req, res) => {
     const url = new URL(req.url!, "http://localhost");
+    if (url.pathname.startsWith("/api/users")) {
+      res.setHeader("content-type", "application/json");
+      if (
+        (url.pathname === `/api/users/${PROFILE.nickname}` && url.searchParams.get("is_nickname") === "1") ||
+        url.pathname === `/api/users/${PROFILE.id}`
+      ) {
+        res.end(JSON.stringify(PROFILE));
+        return;
+      }
+      if (url.pathname === `/api/users/${PROFILE.id}/anime_rates`) {
+        res.end(JSON.stringify(RATES));
+        return;
+      }
+      if (url.pathname === `/api/users/${PROFILE.id}/favourites`) {
+        res.end(JSON.stringify(FAVOURITES));
+        return;
+      }
+      res.statusCode = 404;
+      res.end("no");
+      return;
+    }
     if (url.pathname === "/api/studios") {
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify([{ id: 11, name: "Madhouse", filtered_name: "Madhouse" }]));
@@ -113,6 +151,7 @@ describe("MCP server end-to-end (Madhouse scenario)", () => {
     for (const n of [
       "shikimori_find_studio", "shikimori_studio_animes", "shikimori_anime_characters",
       "shikimori_search", "import_shikimori_poster", "import_youtube_audio",
+      "shikimori_find_user", "shikimori_user_anime_list", "shikimori_user_favourites",
       "create_picker_project", "add_round", "add_tile", "add_tile_from_shikimori",
       "set_playlist", "get_project",
     ]) {
@@ -182,5 +221,54 @@ describe("MCP server end-to-end (Madhouse scenario)", () => {
     await call("delete_round", { roundId: tmpRoundId });
     expect(await prisma.pickerRound.count({ where: { projectId } })).toBe(2);
     expect(await prisma.pickerRound.findUnique({ where: { id: tmpRoundId } })).toBeNull();
+  }, 60_000);
+
+  it("builds a round from the user's own list: rated anime -> its characters", async () => {
+    const user = await call("shikimori_find_user", { user: "andrey03410" });
+    expect(user).toMatchObject({ id: 1270120, nickname: "andrey03410" });
+    await expect(call("shikimori_find_user", { user: "nope-nope" })).rejects.toThrow(
+      /USER_NOT_FOUND/,
+    );
+
+    // only the anime this user rated 8+ ("что он реально смотрел и оценил")
+    const list = await call("shikimori_user_anime_list", { user: "andrey03410", minScore: 8 });
+    expect(list.total).toBe(2);
+    expect(list.countsByStatus).toMatchObject({ completed: 1, dropped: 1 });
+    expect(list.matched).toBe(1);
+    expect(list.items[0]).toMatchObject({ id: 1535, label: "Тетрадь смерти", userScore: 10, status: "completed" });
+
+    // characters of that anime become the tiles of a fresh round
+    const chars = await call("shikimori_anime_characters", { animeId: list.items[0].id });
+    const { projectId, firstRoundId } = await call("create_picker_project", {
+      title: "Из списка andrey03410",
+    });
+    for (const ch of chars.slice(0, 2)) {
+      await call("add_tile_from_shikimori", {
+        roundId: firstRoundId, type: "character", id: ch.id,
+        posterPath: ch.posterPath, label: ch.label,
+      });
+    }
+
+    // favourites are import-ready too (x64 thumbs rewritten to real posters)
+    const fav = await call("shikimori_user_favourites", { user: "andrey03410" });
+    expect(fav.characters[0]).toMatchObject({
+      id: 17, type: "character", posterPath: "/system/characters/original/17.jpg",
+    });
+    const { roundId } = await call("add_round", { projectId, prompt: "Избранное" });
+    await call("add_tile_from_shikimori", {
+      roundId, type: "character", id: fav.characters[0].id,
+      posterPath: fav.characters[0].posterPath, label: fav.characters[0].label, isAnswer: true,
+    });
+    await call("add_tile_from_shikimori", {
+      roundId, type: "anime", id: fav.animes[0].id,
+      posterPath: fav.animes[0].posterPath, label: fav.animes[0].label,
+    });
+
+    const summary = await call("get_project", { projectId });
+    expect(summary.rounds).toHaveLength(2);
+    expect(summary.rounds[0].tiles).toHaveLength(2);
+    expect(summary.rounds[1].tiles.map((t: { label: string }) => t.label)).toEqual([
+      "Лайт", "Тетрадь смерти",
+    ]);
   }, 60_000);
 });
