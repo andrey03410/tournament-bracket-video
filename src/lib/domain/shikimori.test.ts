@@ -5,6 +5,7 @@ import {
   pickLabel,
   absoluteImageUrl,
   isSafeImagePath,
+  isSafePosterUrl,
   matchStudios,
   extractRoleCharacters,
   resizeImagePath,
@@ -118,6 +119,26 @@ describe("isSafeImagePath", () => {
     expect(isSafeImagePath("/uploads/1.jpg")).toBe(false);
     expect(isSafeImagePath("/system/users/original/1.jpg")).toBe(false);
     expect(isSafeImagePath("")).toBe(false);
+  });
+});
+
+describe("isSafePosterUrl", () => {
+  const BASE = "https://shikimori.io";
+  it("accepts the site's own /uploads/poster urls", () => {
+    expect(isSafePosterUrl(BASE, "https://shikimori.io/uploads/poster/animes/16498/7a452aa2.jpeg")).toBe(true);
+    expect(isSafePosterUrl(BASE, "https://shikimori.io/uploads/poster/characters/251/53e2-18.webp")).toBe(true);
+    // a local stand-in with a port is the same origin as its base
+    expect(isSafePosterUrl("http://127.0.0.1:9999", "http://127.0.0.1:9999/uploads/poster/animes/1/a.jpg")).toBe(true);
+  });
+  it("rejects foreign hosts, other origins and non-poster paths", () => {
+    expect(isSafePosterUrl(BASE, "https://evil.example/uploads/poster/animes/1/a.jpeg")).toBe(false);
+    expect(isSafePosterUrl(BASE, "http://shikimori.io/uploads/poster/animes/1/a.jpeg")).toBe(false); // другой протокол
+    expect(isSafePosterUrl("http://127.0.0.1:9999", "http://127.0.0.1:8888/uploads/poster/animes/1/a.jpg")).toBe(false);
+    expect(isSafePosterUrl(BASE, "https://shikimori.io/uploads/poster/users/1/a.jpeg")).toBe(false);
+    expect(isSafePosterUrl(BASE, "https://shikimori.io/uploads/poster/animes/1/../../etc/passwd")).toBe(false);
+    expect(isSafePosterUrl(BASE, "https://shikimori.io/uploads/poster/animes/1/a.svg")).toBe(false);
+    expect(isSafePosterUrl(BASE, "/uploads/poster/animes/1/a.jpeg")).toBe(false); // не абсолютный
+    expect(isSafePosterUrl(BASE, "")).toBe(false);
   });
 });
 

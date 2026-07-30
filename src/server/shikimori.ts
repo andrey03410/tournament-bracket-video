@@ -27,6 +27,8 @@ import {
   searchAnimesRaw,
   searchCharactersRaw,
   fetchPoster,
+  fetchPosterByUrl,
+  fetchFreshPosterUrls,
   fetchStudiosRaw,
   fetchStudioAnimesRaw,
   fetchAnimeRolesRaw,
@@ -248,6 +250,11 @@ export interface ImportPosterInput {
   posterPath: string;
   label: string | null;
   maxPoolBytes: number | null;
+  /**
+   * Current poster URL (GraphQL `poster.originalUrl`) when the caller already
+   * resolved it in a batch. Omit and it is resolved per import.
+   */
+  posterUrl?: string | null;
 }
 
 const EXT_BY_CONTENT_TYPE: Record<string, string> = {
@@ -257,9 +264,36 @@ const EXT_BY_CONTENT_TYPE: Record<string, string> = {
   "image/jpeg": ".jpg",
 };
 
+/**
+ * The poster as the site shows it: /uploads/poster/... in full resolution.
+ * The legacy /system path serves an older, 225px-wide copy, so it is only a
+ * fallback for when the fresh URL is unavailable.
+ */
+async function fetchBestPoster(input: ImportPosterInput) {
+  const fresh = input.posterUrl ?? (await freshPosterUrl(input.type, input.id));
+  if (fresh) {
+    try {
+      return await fetchPosterByUrl(fresh);
+    } catch {
+      // fall through to the legacy copy
+    }
+  }
+  return fetchPoster(input.posterPath); // may throw POSTER_FETCH_FAILED
+}
+
+/** Current poster URL of one entry; null when Shikimori has none / errors. */
+async function freshPosterUrl(type: ShikimoriType, id: number): Promise<string | null> {
+  try {
+    const urls = await fetchFreshPosterUrls(type, [id]);
+    return urls.get(id) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function importPoster(userId: string, input: ImportPosterInput): Promise<{ artId: string }> {
   if (!isSafeImagePath(input.posterPath)) throw new Error("BAD_IMAGE_PATH");
-  const { data, contentType } = await fetchPoster(input.posterPath); // may throw POSTER_FETCH_FAILED
+  const { data, contentType } = await fetchBestPoster(input);
   const ext = EXT_BY_CONTENT_TYPE[contentType] ?? ".jpg";
   const art = await createArt(userId, {
     fileName: `shikimori-${input.type}-${input.id}${ext}`,

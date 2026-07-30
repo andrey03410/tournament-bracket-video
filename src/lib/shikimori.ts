@@ -1,13 +1,36 @@
 import "server-only";
-import { absoluteImageUrl, isSafeImagePath } from "@/lib/domain/shikimori";
+import { absoluteImageUrl, isSafeImagePath, isSafePosterUrl } from "@/lib/domain/shikimori";
+import {
+  nextDelayMs,
+  retryDelayMs,
+  trimHistory,
+  type RateLimitConfig,
+} from "@/lib/domain/rate-limit";
 
 const DEFAULT_BASE = "https://shikimori.io";
 const TIMEOUT_MS = 10_000;
-// Shikimori allows ~5 requests/second; an agent walking a user's list makes
-// bursts, so requests are serialized with a small gap and 429 is retried.
-const MIN_INTERVAL_MS = 250;
-const RETRY_BASE_MS = 1000;
-const MAX_RETRIES = 2;
+
+// Shikimori documents two caps: 5 requests/second AND 90 requests/minute. An
+// agent walking a user's list (roles of every anime) blows past the minute cap
+// long before the second one, so both are enforced client-side, with a margin.
+const API_LIMITS: RateLimitConfig = {
+  minIntervalMs: 250,
+  windowMs: 60_000,
+  maxInWindow: 80,
+};
+// Static images are not part of the API quota — only the per-second gap applies.
+const ASSET_LIMITS: RateLimitConfig = { minIntervalMs: 250, windowMs: 1, maxInWindow: 1 };
+
+// A 429 means the window is already exhausted: waits are seconds, not millis.
+const RETRY_SCHEDULE_MS = [2_000, 8_000, 20_000];
+
+/** Test hook: SHIKIMORI_RETRY_MS="10,20" shortens the backoff schedule. */
+function retrySchedule(): number[] {
+  const raw = process.env.SHIKIMORI_RETRY_MS?.trim();
+  if (!raw) return RETRY_SCHEDULE_MS;
+  const parsed = raw.split(",").map((s) => Number(s.trim())).filter((n) => Number.isFinite(n) && n >= 0);
+  return parsed.length > 0 ? parsed : RETRY_SCHEDULE_MS;
+}
 
 export function shikimoriBase(): string {
   return (process.env.SHIKIMORI_BASE_URL?.trim() || DEFAULT_BASE).replace(/\/+$/, "");
@@ -20,14 +43,31 @@ function userAgent(): string {
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 let gate: Promise<unknown> = Promise.resolve();
-let lastRequestAt = 0;
+/** Start timestamps of recent API requests (the sliding-window budget). */
+let apiHistory: number[] = [];
+let lastAssetAt = 0;
 
-/** Serialize outgoing requests keeping at least MIN_INTERVAL_MS between them. */
-function throttle(): Promise<void> {
+/**
+ * Serialize outgoing requests and hold each one until both caps allow it.
+ * API calls consume the minute budget; static images only respect the gap.
+ */
+function throttle(kind: "api" | "asset"): Promise<void> {
   const slot = gate.then(async () => {
-    const wait = lastRequestAt + MIN_INTERVAL_MS - Date.now();
-    if (wait > 0) await sleep(wait);
-    lastRequestAt = Date.now();
+    if (kind === "asset") {
+      const wait = lastAssetAt + ASSET_LIMITS.minIntervalMs - Date.now();
+      if (wait > 0) await sleep(wait);
+      lastAssetAt = Date.now();
+      return;
+    }
+    for (;;) {
+      const wait = nextDelayMs(apiHistory, Date.now(), API_LIMITS);
+      if (wait <= 0) break;
+      await sleep(wait);
+    }
+    const now = Date.now();
+    apiHistory = trimHistory(apiHistory, now, API_LIMITS);
+    apiHistory.push(now);
+    lastAssetAt = now; // an API call also counts as "just talked to the host"
   });
   gate = slot.catch(() => {});
   return slot;
@@ -37,7 +77,7 @@ async function getOnce(pathAndQuery: string): Promise<Response> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
-    await throttle();
+    await throttle("api");
     return await fetch(`${shikimoriBase()}${pathAndQuery}`, {
       headers: { "User-Agent": userAgent(), Accept: "application/json" },
       redirect: "follow",
@@ -49,12 +89,14 @@ async function getOnce(pathAndQuery: string): Promise<Response> {
 }
 
 async function getJson(pathAndQuery: string): Promise<unknown> {
+  const schedule = retrySchedule();
   for (let attempt = 0; ; attempt++) {
     const res = await getOnce(pathAndQuery);
     if (res.status === 429) {
-      // Back off and retry: a burst that trips the limit succeeds a second later.
-      if (attempt >= MAX_RETRIES) throw new Error("RATE_LIMITED");
-      await sleep(RETRY_BASE_MS * 2 ** attempt);
+      // The server's window is exhausted; back off (honouring Retry-After).
+      const wait = retryDelayMs(attempt, schedule, res.headers.get("retry-after"));
+      if (wait == null) throw new Error("RATE_LIMITED");
+      await sleep(wait);
       continue;
     }
     if (!res.ok) throw new Error(`SHIKIMORI_HTTP_${res.status}`);
@@ -118,12 +160,17 @@ export async function fetchUserFavouritesRaw(userId: number): Promise<unknown> {
   return getJson(`/api/users/${userId}/favourites`);
 }
 
-export async function fetchPoster(posterPath: string): Promise<{ data: Buffer; contentType: string }> {
-  if (!isSafeImagePath(posterPath)) throw new Error("BAD_IMAGE_PATH");
+export interface FetchedImage {
+  data: Buffer;
+  contentType: string;
+}
+
+async function fetchImage(url: string): Promise<FetchedImage> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(absoluteImageUrl(shikimoriBase(), posterPath), {
+    await throttle("asset");
+    const res = await fetch(url, {
       headers: { "User-Agent": userAgent() },
       redirect: "follow",
       signal: ctrl.signal,
@@ -139,4 +186,66 @@ export async function fetchPoster(posterPath: string): Promise<{ data: Buffer; c
   } finally {
     clearTimeout(t);
   }
+}
+
+/** Legacy /system poster (older, downscaled copy — kept as a fallback). */
+export async function fetchPoster(posterPath: string): Promise<FetchedImage> {
+  if (!isSafeImagePath(posterPath)) throw new Error("BAD_IMAGE_PATH");
+  return fetchImage(absoluteImageUrl(shikimoriBase(), posterPath));
+}
+
+/** The poster the site itself shows (validated /uploads/poster URL). */
+export async function fetchPosterByUrl(url: string): Promise<FetchedImage> {
+  if (!isSafePosterUrl(shikimoriBase(), url)) throw new Error("BAD_IMAGE_PATH");
+  return fetchImage(url);
+}
+
+export async function fetchGraphql(query: string): Promise<unknown> {
+  await throttle("api");
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(`${shikimoriBase()}/api/graphql`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "User-Agent": userAgent(),
+      },
+      body: JSON.stringify({ query }),
+      redirect: "follow",
+      signal: ctrl.signal,
+    });
+    if (res.status === 429) throw new Error("RATE_LIMITED");
+    if (!res.ok) throw new Error(`SHIKIMORI_HTTP_${res.status}`);
+    return await res.json();
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/**
+ * Current poster URLs (as on the site) for anime or character ids. Batched:
+ * one GraphQL request covers the whole id list.
+ */
+export async function fetchFreshPosterUrls(
+  type: "anime" | "character",
+  ids: number[],
+): Promise<Map<number, string>> {
+  const clean = ids.filter((id) => Number.isInteger(id) && id > 0);
+  const out = new Map<number, string>();
+  if (clean.length === 0) return out;
+  const field = type === "anime" ? "animes" : "characters";
+  const body = await fetchGraphql(
+    `{${field}(ids: "${clean.join(",")}"){ id poster { originalUrl } }}`,
+  );
+  const rows = (body as { data?: Record<string, unknown> })?.data?.[field];
+  if (!Array.isArray(rows)) return out;
+  for (const row of rows) {
+    const r = row as { id?: unknown; poster?: { originalUrl?: unknown } | null };
+    const id = Number(r?.id);
+    const url = r?.poster?.originalUrl;
+    if (Number.isInteger(id) && typeof url === "string") out.set(id, url);
+  }
+  return out;
 }

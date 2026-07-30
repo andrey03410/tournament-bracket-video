@@ -92,6 +92,27 @@ export function isSafeImagePath(path: string): boolean {
 }
 
 /**
+ * Guard for the modern poster URL the site itself shows (GraphQL
+ * `poster.originalUrl`): absolute, on the configured Shikimori origin, under
+ * /uploads/poster/. The legacy /system/ path serves an older, downscaled copy.
+ */
+export function isSafePosterUrl(base: string, url: string): boolean {
+  let parsed: URL;
+  let origin: URL;
+  try {
+    parsed = new URL(url);
+    origin = new URL(base);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
+  if (parsed.host !== origin.host || parsed.protocol !== origin.protocol) return false;
+  return /^\/uploads\/poster\/(animes|characters)\/\d+\/[\w.-]+\.(jpe?g|png|webp)$/.test(
+    parsed.pathname,
+  );
+}
+
+/**
  * Rewrite a /system image path to another size bucket. Favourites come with an
  * `x64` thumb only, while imports need `original` — the id and query suffix
  * (cache buster) are preserved. Returns null for anything unrecognized.

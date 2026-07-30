@@ -22,6 +22,13 @@ const JPG = Buffer.from(
   "base64",
 );
 
+// The poster the site shows lives under /uploads/poster/... and differs from the
+// legacy /system copy — distinguishable bytes let the tests tell them apart.
+const FRESH_JPG = Buffer.concat([JPG, Buffer.alloc(500, 0x20)]);
+/** What the fake GraphQL answers: "url" | "foreign" | "missing" | "error". */
+let graphqlMode: "url" | "foreign" | "missing" | "error" = "url";
+let graphqlCalls = 0;
+
 let userId: string;
 let server: Server;
 /** Query strings the fake Shikimori saw (asserts we don't over-fetch). */
@@ -149,6 +156,37 @@ beforeAll(async () => {
       ]));
       return;
     }
+    if (url.pathname === "/api/graphql") {
+      graphqlCalls++;
+      if (graphqlMode === "error") {
+        res.statusCode = 500;
+        return res.end("boom");
+      }
+      // the id list is echoed back with a poster url of the requested shape
+      const body: string[] = [];
+      req.on("data", (c) => body.push(String(c)));
+      req.on("end", () => {
+        const query = JSON.parse(body.join("") || "{}").query as string;
+        const field = query.includes("characters(") ? "characters" : "animes";
+        const ids = (/ids: "([\d,]*)"/.exec(query)?.[1] ?? "").split(",").filter(Boolean);
+        const host = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+        const poster = (id: string) => {
+          if (graphqlMode === "missing") return null;
+          const base = graphqlMode === "foreign" ? "https://evil.example" : host;
+          return { originalUrl: `${base}/uploads/poster/${field}/${id}/abc123.jpeg` };
+        };
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({
+          data: { [field]: ids.map((id) => ({ id, poster: poster(id) })) },
+        }));
+      });
+      return;
+    }
+    if (/^\/uploads\/poster\/(animes|characters)\/\d+\/[\w.-]+$/.test(url.pathname)) {
+      res.setHeader("content-type", "image/jpeg");
+      res.end(FRESH_JPG);
+      return;
+    }
     if (url.pathname.startsWith("/system/")) {
       res.setHeader("content-type", "image/jpeg");
       res.end(JPG);
@@ -190,7 +228,9 @@ describe("shikimori search", () => {
 });
 
 describe("shikimori importPoster", () => {
-  it("downloads the poster into the pool as an image art", async () => {
+  it("downloads the poster the site shows (fresh /uploads url), not the legacy copy", async () => {
+    graphqlMode = "url";
+    const before = graphqlCalls;
     const { artId } = await importPoster(userId, {
       type: "anime", id: 20, posterPath: "/system/animes/original/20.jpg",
       label: "Наруто", maxPoolBytes: null,
@@ -198,7 +238,34 @@ describe("shikimori importPoster", () => {
     const art = await prisma.art.findUniqueOrThrow({ where: { id: artId } });
     expect(art.kind).toBe("image");
     expect(art.label).toBe("Наруто");
-    expect(art.sizeBytes).toBeGreaterThan(0);
+    expect(art.sizeBytes).toBe(FRESH_JPG.length); // не legacy JPG.length
+    expect(graphqlCalls).toBe(before + 1);
+  });
+
+  it("a pre-resolved posterUrl is used as is (no extra GraphQL call)", async () => {
+    const host = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    const before = graphqlCalls;
+    const { artId } = await importPoster(userId, {
+      type: "character", id: 17, posterPath: "/system/characters/original/17.jpg",
+      posterUrl: `${host}/uploads/poster/characters/17/fresh.jpeg`,
+      label: "Наруто Узумаки", maxPoolBytes: null,
+    });
+    const art = await prisma.art.findUniqueOrThrow({ where: { id: artId } });
+    expect(art.sizeBytes).toBe(FRESH_JPG.length);
+    expect(graphqlCalls).toBe(before);
+  });
+
+  it("falls back to the legacy poster when the fresh url is absent, broken or foreign", async () => {
+    for (const mode of ["missing", "error", "foreign"] as const) {
+      graphqlMode = mode;
+      const { artId } = await importPoster(userId, {
+        type: "anime", id: 20, posterPath: "/system/animes/original/20.jpg",
+        label: `fallback-${mode}`, maxPoolBytes: null,
+      });
+      const art = await prisma.art.findUniqueOrThrow({ where: { id: artId } });
+      expect(art.sizeBytes, mode).toBe(JPG.length); // legacy-копия
+    }
+    graphqlMode = "url";
   });
 
   it("rejects an unsafe image path", async () => {
@@ -320,15 +387,23 @@ describe("shikimori user list & favourites", () => {
   });
 
   it("retries a 429 (Shikimori rate limit) and gives up after the retries", async () => {
-    rateLimitOnce = 1;
-    const before = seen.length;
-    expect(await findUser("andrey03410")).toMatchObject({ id: 1270120 });
-    expect(seen.length - before).toBe(2); // одна отбитая попытка + успешная
+    // the real backoff is seconds; the test hook keeps the suite fast
+    process.env.SHIKIMORI_RETRY_MS = "10,20,30";
+    try {
+      rateLimitOnce = 1;
+      const before = seen.length;
+      expect(await findUser("andrey03410")).toMatchObject({ id: 1270120 });
+      expect(seen.length - before).toBe(2); // одна отбитая попытка + успешная
 
-    // beyond the retry budget the error is explicit, not a silent empty result
-    rateLimitOnce = 5;
-    await expect(findUser("andrey03410")).rejects.toThrow("RATE_LIMITED");
-    rateLimitOnce = 0;
+      // beyond the retry budget the error is explicit, not a silent empty result
+      rateLimitOnce = 9;
+      const attemptsBefore = seen.length;
+      await expect(findUser("andrey03410")).rejects.toThrow("RATE_LIMITED");
+      expect(seen.length - attemptsBefore).toBe(4); // первая + 3 ретрая
+      rateLimitOnce = 0;
+    } finally {
+      delete process.env.SHIKIMORI_RETRY_MS;
+    }
   }, 20_000);
 
   it("a favourite poster path really imports into the pool", async () => {
