@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createServer, type Server } from "node:http";
 import { prisma } from "@/lib/db";
 import { removePath } from "@/lib/storage";
+import { fetchFreshPosterUrls } from "@/lib/shikimori";
 import {
   search, importPoster, findStudio, studioAnimes, animeCharacters,
   findUser, userAnimeList, userFavourites,
@@ -168,7 +169,10 @@ beforeAll(async () => {
       req.on("end", () => {
         const query = JSON.parse(body.join("") || "{}").query as string;
         const field = query.includes("characters(") ? "characters" : "animes";
-        const ids = (/ids: "([\d,]*)"/.exec(query)?.[1] ?? "").split(",").filter(Boolean);
+        const all = (/ids: "([\d,]*)"/.exec(query)?.[1] ?? "").split(",").filter(Boolean);
+        // like the real API: without an explicit limit only two entries come back
+        const limit = Number(/limit: (\d+)/.exec(query)?.[1] ?? 2);
+        const ids = all.slice(0, limit);
         const host = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
         const poster = (id: string) => {
           if (graphqlMode === "missing") return null;
@@ -253,6 +257,17 @@ describe("shikimori importPoster", () => {
     const art = await prisma.art.findUniqueOrThrow({ where: { id: artId } });
     expect(art.sizeBytes).toBe(FRESH_JPG.length);
     expect(graphqlCalls).toBe(before);
+  });
+
+  it("resolves poster urls for a whole batch, not just the API's default page", async () => {
+    graphqlMode = "url";
+    const ids = Array.from({ length: 120 }, (_, i) => i + 1);
+    const urls = await fetchFreshPosterUrls("character", ids);
+    // без явного limit Shikimori отдаёт только 2 записи на запрос
+    expect(urls.size).toBe(120);
+    expect(urls.get(77)).toContain("/uploads/poster/characters/77/");
+    // 120 id -> 3 страницы по 50
+    expect(await fetchFreshPosterUrls("anime", [])).toEqual(new Map());
   });
 
   it("falls back to the legacy poster when the fresh url is absent, broken or foreign", async () => {

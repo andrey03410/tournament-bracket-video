@@ -224,28 +224,35 @@ export async function fetchGraphql(query: string): Promise<unknown> {
   }
 }
 
+/** Shikimori's GraphQL caps a page at 50 entries. */
+const GRAPHQL_PAGE = 50;
+
 /**
- * Current poster URLs (as on the site) for anime or character ids. Batched:
- * one GraphQL request covers the whole id list.
+ * Current poster URLs (as on the site) for anime or character ids, in pages of
+ * 50. `limit` is mandatory in practice: without it Shikimori answers with just
+ * TWO entries and the rest would silently fall back to the legacy poster.
  */
 export async function fetchFreshPosterUrls(
   type: "anime" | "character",
   ids: number[],
 ): Promise<Map<number, string>> {
-  const clean = ids.filter((id) => Number.isInteger(id) && id > 0);
+  const clean = [...new Set(ids.filter((id) => Number.isInteger(id) && id > 0))];
   const out = new Map<number, string>();
-  if (clean.length === 0) return out;
   const field = type === "anime" ? "animes" : "characters";
-  const body = await fetchGraphql(
-    `{${field}(ids: "${clean.join(",")}"){ id poster { originalUrl } }}`,
-  );
-  const rows = (body as { data?: Record<string, unknown> })?.data?.[field];
-  if (!Array.isArray(rows)) return out;
-  for (const row of rows) {
-    const r = row as { id?: unknown; poster?: { originalUrl?: unknown } | null };
-    const id = Number(r?.id);
-    const url = r?.poster?.originalUrl;
-    if (Number.isInteger(id) && typeof url === "string") out.set(id, url);
+
+  for (let i = 0; i < clean.length; i += GRAPHQL_PAGE) {
+    const page = clean.slice(i, i + GRAPHQL_PAGE);
+    const body = await fetchGraphql(
+      `{${field}(ids: "${page.join(",")}", limit: ${page.length}){ id poster { originalUrl } }}`,
+    );
+    const rows = (body as { data?: Record<string, unknown> })?.data?.[field];
+    if (!Array.isArray(rows)) continue;
+    for (const row of rows) {
+      const r = row as { id?: unknown; poster?: { originalUrl?: unknown } | null };
+      const id = Number(r?.id);
+      const url = r?.poster?.originalUrl;
+      if (Number.isInteger(id) && typeof url === "string") out.set(id, url);
+    }
   }
   return out;
 }
