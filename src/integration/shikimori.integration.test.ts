@@ -5,7 +5,7 @@ import { removePath } from "@/lib/storage";
 import { fetchFreshPosterUrls } from "@/lib/shikimori";
 import {
   search, importPoster, findStudio, studioAnimes, animeCharacters,
-  findUser, userAnimeList, userFavourites,
+  findUser, userAnimeList, userFavourites, characterProfile,
 } from "@/server/shikimori";
 
 // Real DB + createArt pipeline; Shikimori is a LOCAL http server pointed at via
@@ -147,6 +147,24 @@ beforeAll(async () => {
         { id: 20, name: "Naruto", russian: "Наруто", kind: "tv", score: "8.02", aired_on: "2002-10-03",
           image: { original: "/system/animes/original/20.jpg", preview: "/system/animes/preview/20.jpg" } },
       ]));
+      return;
+    }
+    if (/^\/api\/characters\/\d+$/.test(url.pathname)) {
+      const id = Number(url.pathname.split("/").pop());
+      if (id !== 17) {
+        res.statusCode = 404;
+        return res.end("no");
+      }
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({
+        id: 17, name: "Rika Furude", russian: "Рика Фурудэ",
+        image: { original: "/system/characters/original/17.jpg", preview: "/system/characters/preview/17.jpg" },
+        animes: [
+          { id: 41006, name: "Higurashi Gou", russian: "Цикады: Карма", kind: "tv", aired_on: "2020-10-01" },
+          { id: 934, name: "Higurashi", russian: "Когда плачут цикады", kind: "tv", aired_on: "2006-04-05" },
+          { id: 555, name: "Undated", russian: "Без даты", kind: "special", aired_on: null },
+        ],
+      }));
       return;
     }
     if (url.pathname === "/api/characters/search") {
@@ -318,6 +336,15 @@ describe("shikimori discovery", () => {
     expect(res).toHaveLength(1);
     expect(res[0]).toMatchObject({ id: 17, type: "character", label: "Лайт Ягами",
       posterPath: "/system/characters/original/17.jpg" });
+  });
+  it("character profile carries the debut year, not the year of a remake", async () => {
+    const p = await characterProfile(17);
+    expect(p).toMatchObject({ id: 17, type: "character", label: "Рика Фурудэ",
+      posterPath: "/system/characters/original/17.jpg", debutYear: 2006 });
+    // oldest first, undatable entries dropped
+    expect(p.animes.map((a) => a.year)).toEqual([2006, 2020]);
+    expect(p.animes[0].label).toBe("Когда плачут цикады");
+    await expect(characterProfile(999)).rejects.toThrow();
   });
   it("role='all' includes supporting characters", async () => {
     const res = await animeCharacters(1535, { role: "all" });

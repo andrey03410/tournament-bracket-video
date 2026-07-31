@@ -21,6 +21,7 @@ import {
   type UserRate,
   type UserRateOrder,
   type UserRateStatus,
+  extractCharacterProfile,
 } from "@/lib/domain/shikimori";
 import {
   shikimoriBase,
@@ -35,6 +36,7 @@ import {
   fetchUserRaw,
   fetchUserAnimeRatesRaw,
   fetchUserFavouritesRaw,
+  fetchCharacterRaw,
 } from "@/lib/shikimori";
 import { createArt } from "@/server/arts";
 
@@ -112,6 +114,34 @@ export async function studioAnimes(
   const raw = await fetchStudioAnimesRaw(studioId, order, limit);
   return raw.map(mapAnimeResult).filter((r): r is AnimeResult => r != null)
     .slice(0, limit).map((r) => animeToDto(base, r));
+}
+
+export interface CharacterProfileDto {
+  id: number;
+  type: "character";
+  label: string;
+  posterPath: string | null;
+  /** Year of the first appearance (null when nothing is datable). */
+  debutYear: number | null;
+  animes: { id: number; label: string; kind: string | null; year: number }[];
+}
+
+/**
+ * One character with the anime they appear in, oldest first. `debutYear` is the
+ * character's own era — a 2006 heroine stays a 2006 heroine in a 2020 remake.
+ */
+export async function characterProfile(id: number): Promise<CharacterProfileDto> {
+  const raw = await fetchCharacterRaw(id);
+  const profile = extractCharacterProfile(raw);
+  if (!profile) throw new Error("CHARACTER_NOT_FOUND");
+  return {
+    id: profile.id,
+    type: "character",
+    label: profile.label,
+    posterPath: profile.posterPath && isSafeImagePath(profile.posterPath) ? profile.posterPath : null,
+    debutYear: profile.debutYear,
+    animes: profile.animes,
+  };
 }
 
 export async function animeCharacters(

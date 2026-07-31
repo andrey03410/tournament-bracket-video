@@ -114,6 +114,11 @@ export async function searchCharactersRaw(q: string): Promise<unknown[]> {
   return Array.isArray(data) ? data : [];
 }
 
+/** Character details (includes the anime list with airing dates). */
+export async function fetchCharacterRaw(id: number): Promise<unknown> {
+  return getJson(`/api/characters/${id}`);
+}
+
 export async function fetchStudiosRaw(): Promise<unknown[]> {
   const data = await getJson(`/api/studios`);
   return Array.isArray(data) ? data : [];

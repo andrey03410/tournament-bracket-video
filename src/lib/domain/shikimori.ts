@@ -309,6 +309,63 @@ interface RawRoleEntry {
   character?: unknown;
 }
 
+export interface CharacterAnime {
+  id: number;
+  label: string;
+  kind: string | null;
+  /** Airing year; entries without a date are dropped. */
+  year: number;
+}
+
+export interface CharacterProfile {
+  id: number;
+  label: string;
+  posterPath: string | null;
+  /** Anime this character appears in, oldest first. */
+  animes: CharacterAnime[];
+  /** Year of the earliest appearance — the character's own era. */
+  debutYear: number | null;
+}
+
+interface RawCharacterAnime {
+  id?: unknown;
+  name?: unknown;
+  russian?: unknown;
+  kind?: unknown;
+  aired_on?: unknown;
+}
+
+/**
+ * Character details from /api/characters/:id. The debut year matters because a
+ * character belongs to the era of their FIRST appearance, not of the season a
+ * poster happens to come from (Рика Фурудэ debuted in 2006, not in the 2020
+ * remake).
+ */
+export function extractCharacterProfile(raw: unknown): CharacterProfile | null {
+  const h = raw as RawHit & { animes?: unknown };
+  if (typeof h?.id !== "number") return null;
+  const label = pickLabel(str(h.russian), str(h.name));
+  if (!label) return null;
+  const list = Array.isArray(h.animes) ? h.animes : [];
+  const animes: CharacterAnime[] = [];
+  for (const item of list) {
+    const a = item as RawCharacterAnime;
+    const aired = str(a?.aired_on);
+    const year = aired ? Number(aired.slice(0, 4)) : NaN;
+    const name = pickLabel(str(a?.russian), str(a?.name));
+    if (typeof a?.id !== "number" || !Number.isFinite(year) || !name) continue;
+    animes.push({ id: a.id, label: name, kind: str(a?.kind), year });
+  }
+  animes.sort((x, y) => x.year - y.year || x.id - y.id);
+  return {
+    id: h.id,
+    label,
+    posterPath: imgPath(h.image, "original"),
+    animes,
+    debutYear: animes.length ? animes[0].year : null,
+  };
+}
+
 /** Pull characters out of an /animes/:id/roles response, optionally Main-only. */
 export function extractRoleCharacters(
   rawRoles: unknown[],

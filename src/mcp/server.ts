@@ -5,7 +5,7 @@ import { resolveActor, type Actor } from "@/mcp/actor";
 import { can, quotasFor } from "@/lib/domain/permissions";
 import {
   search, findStudio, studioAnimes, animeCharacters, importPoster,
-  findUser, userAnimeList, userFavourites,
+  findUser, userAnimeList, userFavourites, characterProfile,
 } from "@/server/shikimori";
 import { USER_RATE_STATUSES } from "@/lib/domain/shikimori";
 import {
@@ -99,6 +99,15 @@ async function main() {
     { description: "Избранное пользователя: аниме и персонажи (posterPath готов для import_shikimori_poster). → {user, animes:[...], characters:[...]}",
       inputSchema: { user: z.string() } },
     ({ user }) => guard(() => userFavourites(user)),
+  );
+  server.registerTool(
+    "shikimori_character",
+    { description:
+        "Персонаж и все аниме, где он появляется (старые сначала). debutYear — год первого " +
+        "появления, то есть «эпоха» самого персонажа: у героини 2006 года она остаётся 2006 " +
+        "даже в ремейке 2020-го. → {id, type:'character', label, posterPath, debutYear, animes:[{id, label, kind, year}]}",
+      inputSchema: { id: z.number() } },
+    ({ id }) => guard(() => characterProfile(id)),
   );
   server.registerTool(
     "shikimori_search",

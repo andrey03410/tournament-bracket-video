@@ -14,6 +14,7 @@ import {
   selectUserRates,
   countByStatus,
   extractFavourites,
+  extractCharacterProfile,
   type UserRate,
 } from "@/lib/domain/shikimori";
 
@@ -328,5 +329,43 @@ describe("extractRoleCharacters", () => {
   });
   it("role='all' keeps every valid character", () => {
     expect(extractRoleCharacters(roles, "all").map((c) => c.id).sort()).toEqual([17, 18]);
+  });
+});
+
+describe("extractCharacterProfile", () => {
+  const raw = {
+    id: 17,
+    name: "Rika Furude",
+    russian: "Рика Фурудэ",
+    image: { original: "/system/characters/original/17.jpg", preview: "/system/characters/preview/17.jpg" },
+    animes: [
+      { id: 41006, name: "Higurashi Gou", russian: "Цикады: Карма", kind: "tv", aired_on: "2020-10-01", roles: ["Main"] },
+      { id: 934, name: "Higurashi no Naku Koro ni", russian: "Когда плачут цикады", kind: "tv", aired_on: "2006-04-05", roles: ["Main"] },
+      { id: 999, name: "Some special", russian: null, kind: "special", aired_on: null, roles: ["Supporting"] },
+    ],
+  };
+
+  it("keeps the anime with a known airing year and sorts them oldest first", () => {
+    const p = extractCharacterProfile(raw)!;
+    expect(p.id).toBe(17);
+    expect(p.label).toBe("Рика Фурудэ");
+    expect(p.posterPath).toBe("/system/characters/original/17.jpg");
+    expect(p.animes.map((a) => a.year)).toEqual([2006, 2020]);
+    expect(p.animes[0]).toMatchObject({ id: 934, label: "Когда плачут цикады", kind: "tv", year: 2006 });
+  });
+
+  it("debutYear is the earliest appearance — the era of a character, not of a season", () => {
+    expect(extractCharacterProfile(raw)!.debutYear).toBe(2006);
+  });
+
+  it("survives a character without datable anime", () => {
+    const p = extractCharacterProfile({ id: 5, name: "Nobody", animes: [{ id: 1, name: "x", aired_on: null }] })!;
+    expect(p.animes).toEqual([]);
+    expect(p.debutYear).toBeNull();
+  });
+
+  it("rejects junk", () => {
+    expect(extractCharacterProfile(null)).toBeNull();
+    expect(extractCharacterProfile({ name: "no id" })).toBeNull();
   });
 });

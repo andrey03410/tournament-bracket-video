@@ -236,6 +236,7 @@ npm run mcp
 | `shikimori_studio_animes` | аниме студии (по популярности) | `[{id, type, label, posterPath, facts}]` |
 | `shikimori_anime_characters` | персонажи аниме (по умолчанию Main) | `[{id, type, label, posterPath}]` |
 | `shikimori_search` | поиск аниме/персонажа по названию | `[{id, type, label, posterPath, facts}]` |
+| `shikimori_character` | персонаж и все его аниме (старые первыми); `debutYear` — год первого появления, то есть «эпоха» самого персонажа | `{id, label, posterPath, debutYear, animes:[{id, label, kind, year}]}` |
 | `shikimori_find_user` | пользователь по нику (или числовому id) | `{id, nickname, url, avatarUrl}` |
 | `shikimori_user_anime_list` | список аниме пользователя с **его** оценками и статусами; фильтры `status` (`planned`/`watching`/`rewatching`/`completed`/`on_hold`/`dropped`/`all`), `minScore`, порядок `score`/`updated`/`name`, `limit` ≤ 500 | `{user, total, countsByStatus, matched, items:[{id, label, kind, posterPath, userScore, status, episodes, rewatches, updatedAt}]}` |
 | `shikimori_user_favourites` | избранное пользователя: аниме и персонажи (пути постеров готовы к импорту) | `{user, animes, characters}` |
