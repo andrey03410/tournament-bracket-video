@@ -84,10 +84,16 @@ MCP-инструменты `create_picker_project`/`add_round` принимаю�
 политика в `lib/domain/rate-limit.ts` — скользящее окно + расписание повторов с
 `Retry-After`), а импорт постера берёт файл как на сайте (GraphQL
 `poster.originalUrl`, `/uploads/poster/...`, полное разрешение) с откатом на
-старую `/system`-копию.
+старую `/system`-копию, Фаза 15 — оформление проекта из MCP: чтение пула
+(`list_pool`, отдаёт и абсолютный путь файла), задний фон и настройки проекта
+(`set_project`, `backgroundArtId`), импорт медиа прямо с диска
+(`list_local_media`/`import_local_media` в границах allowlist
+`MCP_LOCAL_MEDIA_DIRS`, оригиналы не перемещаются — в пул уходит копия),
+`get_project` показывает фон, `playlistSec` и плановый `durationSec`, чтобы
+плейлист подбирался под хронометраж.
 Стек: Next.js + Prisma (SQLite) + Auth.js + Remotion + ffmpeg-static +
 react-easy-crop. Запуск и инструкции — в [`README.md`](README.md). Доменная
-логика и сервисный слой покрыты тестами (`npm test`, 350 тестов, включая
+логика и сервисный слой покрыты тестами (`npm test`, 375 тестов, включая
 интеграционные на реальной БД); ffmpeg-пайплайн, полный HTTP E2E (включая
 ролевой и проектный), UI-сценарии (headless Chrome) и headless-рендеры MP4
 (топ и пикер, кадры проверены) провалидированы — рецепт в

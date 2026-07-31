@@ -1,16 +1,9 @@
 import AdmZip from "adm-zip";
+import { AUDIO_EXT, VIDEO_EXT, isJunkName as isJunk } from "@/lib/domain/media-ext";
 
-export const AUDIO_EXT = [".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".opus"];
-// Browser-compatible containers only (no transcode on upload — agreed in spec 04).
-export const VIDEO_EXT = [".mp4", ".webm", ".mov"];
+export { AUDIO_EXT, VIDEO_EXT };
 
 export type TrackKind = "audio" | "video";
-
-/** Skip macOS resource forks and dotfiles regardless of extension. */
-function isJunk(name: string): boolean {
-  const lower = name.toLowerCase();
-  return lower.includes("__macosx") || (lower.split("/").pop()?.startsWith(".") ?? false);
-}
 
 /** Pure: is this filename a supported audio file? */
 export function isAudioFile(name: string): boolean {

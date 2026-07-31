@@ -11,6 +11,10 @@ import { USER_RATE_STATUSES } from "@/lib/domain/shikimori";
 import {
   createProject, getProject, addRound, patchRound, deleteRound, addTile, patchTile, patchProject, setPlaylist,
 } from "@/server/projects";
+import { absPath } from "@/lib/storage";
+import { listArts, type PoolKind } from "@/server/arts";
+import { listLocalMedia, importLocalMedia, mediaDirs } from "@/server/local-media";
+import { buildPickerPreviewPlan } from "@/server/picker-render";
 import { addTileFromShikimori } from "@/mcp/compose";
 import { importYoutubeAudio } from "@/mcp/youtube";
 import { projectSummary } from "@/mcp/project-summary";
@@ -106,6 +110,56 @@ async function main() {
     ({ type, id, posterPath, label }) =>
       !canUpload ? Promise.resolve(fail("Импорт медиа недоступен вашей роли"))
         : guard(() => importPoster(uid, { type: type as ShikimoriType, id, posterPath, label: label ?? null, maxPoolBytes })),
+  );
+  server.registerTool(
+    "list_pool",
+    { description:
+        "Что уже лежит в пуле медиа актора: картинки/видео/аудио с длительностью и путём файла " +
+        "(filePath — абсолютный, картинку можно посмотреть глазами, если клиент умеет). " +
+        "query фильтрует по подписи, kind — по типу; новые сверху. → {arts:[{id, label, kind, durationSec, hasAudio, sizeBytes, filePath, createdAt}], nextCursor}",
+      inputSchema: {
+        kind: z.enum(["image", "video", "audio"]).optional(),
+        query: z.string().optional(),
+        limit: z.number().optional(),
+        cursor: z.string().optional(),
+      } },
+    ({ kind, query, limit, cursor }) => guard(async () => {
+      const page = await listArts(uid, { kind: kind as PoolKind | undefined, q: query, limit, cursor });
+      return {
+        arts: page.arts.map((a) => ({
+          id: a.id,
+          label: a.label,
+          kind: a.kind,
+          durationSec: a.durationSec,
+          hasAudio: a.hasAudio,
+          sizeBytes: a.sizeBytes,
+          filePath: absPath(a.filePath),
+          createdAt: a.createdAt,
+        })),
+        nextCursor: page.nextCursor,
+      };
+    }),
+  );
+  server.registerTool(
+    "list_local_media",
+    { description:
+        "Медиа-файлы папки на диске машины (без рекурсии). Разрешены только папки из " +
+        "MCP_LOCAL_MEDIA_DIRS: вне них — ошибка PATH_NOT_ALLOWED, без переменной — LOCAL_MEDIA_DISABLED. " +
+        "→ {dir, roots, files:[{name, path, kind, sizeBytes}]}",
+      inputSchema: { dir: z.string() } },
+    ({ dir }) => guard(async () => ({ ...(await listLocalMedia(dir)), roots: mediaDirs() })),
+  );
+  server.registerTool(
+    "import_local_media",
+    { description:
+        "Импортировать локальные файлы (пути из list_local_media) в пул. Оригиналы остаются на месте; " +
+        "подпись берётся из имени файла. Не больше 50 файлов за вызов; проблемные файлы приходят " +
+        "в failed (BAD_EXT / PATH_NOT_ALLOWED / NOT_FOUND / POOL_QUOTA), остальные импортируются. " +
+        "→ {items:[{artId, label, kind, durationSec, sizeBytes}], failed:[{path, error}]}",
+      inputSchema: { paths: z.array(z.string()) } },
+    ({ paths }) =>
+      !canUpload ? Promise.resolve(fail("Импорт медиа недоступен вашей роли"))
+        : guard(() => importLocalMedia(uid, { paths, maxPoolBytes })),
   );
   server.registerTool(
     "import_youtube_audio",
@@ -215,13 +269,50 @@ async function main() {
     ({ projectId, artIds }) => guard(async () => { await setPlaylist(uid, projectId, artIds); return { ok: true }; }),
   );
   server.registerTool(
+    "set_project",
+    { description:
+        "Изменить сам проект: задний фон (backgroundArtId — картинка или видео из пула, null снимает фон), " +
+        "название, ориентацию плиток, тексты интро/аутро (пустая строка выключает экран), " +
+        "время показа блока, таймер, скрытие блока после показа, тиканье таймера. " +
+        "Фоновая музыка ставится отдельно — set_playlist. → {ok:true}",
+      inputSchema: {
+        projectId: z.string(),
+        backgroundArtId: z.string().nullable().optional(),
+        title: z.string().optional(),
+        orientation: z.enum(["landscape", "portrait"]).optional(),
+        introText: z.string().optional(),
+        outroText: z.string().optional(),
+        revealSec: z.number().optional(),
+        timerSec: z.number().optional(),
+        hideAfterReveal: z.boolean().optional(),
+        tickSound: z.boolean().optional(),
+      } },
+    (args) => guard(async () => {
+      const { projectId, backgroundArtId, introText, outroText, ...rest } = args;
+      await patchProject(uid, projectId, {
+        ...rest,
+        ...(backgroundArtId !== undefined ? { bgArtId: backgroundArtId } : {}),
+        ...(introText !== undefined
+          ? { introText, introEnabled: introText.trim() !== "" }
+          : {}),
+        ...(outroText !== undefined
+          ? { outroText, outroEnabled: outroText.trim() !== "" }
+          : {}),
+      });
+      return { ok: true };
+    }),
+  );
+  server.registerTool(
     "get_project",
     { description: "Прочитать структуру проекта (раунды/плитки/ответы/плейлист) для самопроверки. → summary",
       inputSchema: { projectId: z.string() } },
     ({ projectId }) => guard(async () => {
       const p = await getProject(uid, projectId);
       if (!p) throw new Error("Проект не найден");
-      return projectSummary(p);
+      // Planned runtime helps size a playlist to the video (pickers only).
+      const durationSec =
+        p.kind === "picker" ? buildPickerPreviewPlan(p).durationSec : undefined;
+      return projectSummary(p, { durationSec });
     }),
   );
   server.registerTool(

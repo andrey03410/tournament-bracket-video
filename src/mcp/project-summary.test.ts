@@ -5,7 +5,8 @@ import type { LoadedProject } from "@/server/projects";
 const fake = {
   id: "p1", title: "Персонажи Madhouse", kind: "picker",
   introEnabled: true, introText: null, outroEnabled: false, outroText: "Пока",
-  playlist: [{ artId: "a9", art: { label: "OST" } }],
+  bgArt: null,
+  playlist: [{ artId: "a9", art: { label: "OST", durationSec: 164 } }],
   rounds: [
     { id: "r1", order: 0, prompt: "Кто главный?",
       tiles: [
@@ -22,7 +23,9 @@ describe("projectSummary", () => {
       id: "p1", title: "Персонажи Madhouse", kind: "picker", url: "/projects/p1",
       // blank intro text falls back to the title; a disabled card reads as null
       intro: "Персонажи Madhouse", outro: null,
-      playlist: [{ artId: "a9", label: "OST" }],
+      background: null,
+      playlist: [{ artId: "a9", label: "OST", durationSec: 164 }],
+      playlistSec: 164,
       rounds: [
         { id: "r1", order: 0, prompt: "Кто главный?",
           tiles: [
@@ -31,5 +34,15 @@ describe("projectSummary", () => {
           ] },
       ],
     });
+  });
+
+  it("reports the background art and the planned runtime when given one", () => {
+    const withBg = {
+      ...fake,
+      bgArt: { id: "bg1", label: "Нагиса", kind: "image" },
+    } as unknown as LoadedProject;
+    const s = projectSummary(withBg, { durationSec: 551.9 });
+    expect(s.background).toEqual({ artId: "bg1", label: "Нагиса", kind: "image" });
+    expect(s.durationSec).toBe(551.9);
   });
 });

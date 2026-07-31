@@ -3,7 +3,7 @@ import path from "node:path";
 import { prisma } from "@/lib/db";
 import { saveFile, removePath, artPath, absPath } from "@/lib/storage";
 import { probeMediaInfo, extractPoster } from "@/lib/audio";
-import { AUDIO_EXT, VIDEO_EXT } from "@/lib/upload";
+import { AUDIO_EXT, VIDEO_EXT, IMG_EXT } from "@/lib/domain/media-ext";
 import type { MediaKind } from "@/lib/domain/position-media";
 
 /** Pool media kinds: visuals (image/video) + phase-6 audio tracks. */
@@ -13,8 +13,7 @@ export type PoolKind = MediaKind | "audio";
 // pagination, upload, rename, delete. Kept framework-free (thin routes on top)
 // so the full behavior is covered by integration tests against the real schema.
 
-export const IMG_EXT = [".jpg", ".jpeg", ".png", ".webp", ".gif"];
-export { VIDEO_EXT, AUDIO_EXT };
+export { IMG_EXT, VIDEO_EXT, AUDIO_EXT };
 
 const DEFAULT_LIMIT = 40;
 const MAX_LIMIT = 100;
@@ -28,6 +27,7 @@ export interface ArtRow {
   durationSec: number | null;
   hasAudio: boolean;
   posterPath: string | null;
+  sizeBytes: number | null;
   usageCount: number;
   lastUsedAt: Date | null;
   createdAt: Date;
@@ -48,6 +48,7 @@ function toRow(a: ArtWithCount): ArtRow {
     durationSec: a.durationSec,
     hasAudio: a.hasAudio,
     posterPath: a.posterPath,
+    sizeBytes: a.sizeBytes,
     usageCount: a._count.renderItems,
     lastUsedAt: a.lastUsedAt,
     createdAt: a.createdAt,

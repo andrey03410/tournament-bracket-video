@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createServer, type Server } from "node:http";
-import { resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { resolve, join } from "node:path";
+import { spawn } from "node:child_process";
+import ffmpegPath from "ffmpeg-static";
 import { prisma } from "@/lib/db";
 import { removePath } from "@/lib/storage";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -24,6 +29,18 @@ let userId: string;
 let shiki: Server;
 let client: Client;
 let transport: StdioClientTransport;
+// Local-disk fixture: an allowlisted "ost" folder and a sibling that is not.
+let ostDir: string;
+let secretsDir: string;
+
+const FFMPEG = ffmpegPath as unknown as string;
+function ffmpeg(args: string[]): Promise<void> {
+  return new Promise((res, rej) => {
+    const proc = spawn(FFMPEG, ["-y", ...args], { stdio: ["ignore", "ignore", "pipe"] });
+    proc.on("error", rej);
+    proc.on("close", (code) => (code === 0 ? res() : rej(new Error(`ffmpeg ${code}`))));
+  });
+}
 
 async function cleanup() {
   const users = await prisma.user.findMany({ where: { email: EMAIL } });
@@ -122,6 +139,23 @@ beforeAll(async () => {
   const user = await prisma.user.create({ data: { email: EMAIL, passwordHash: "x", role: "admin" } });
   userId = user.id;
 
+  const base = await mkdtemp(join(tmpdir(), "mcp-e2e-"));
+  ostDir = join(base, "ost");
+  secretsDir = join(base, "secrets");
+  await mkdir(ostDir, { recursive: true });
+  await mkdir(secretsDir, { recursive: true });
+  await ffmpeg([
+    "-f", "lavfi", "-i", "sine=frequency=330:duration=1",
+    "-c:a", "libmp3lame", join(ostDir, "01. calm.mp3"),
+  ]);
+  await ffmpeg([
+    "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+    "-c:a", "libmp3lame", join(ostDir, "02. calmer.mp3"),
+  ]);
+  await writeFile(join(ostDir, "bg.jpg"), JPG);
+  await writeFile(join(ostDir, "notes.txt"), "not media");
+  await writeFile(join(secretsDir, "passwords.mp3"), "secret");
+
   transport = new StdioClientTransport({
     command: resolve(ROOT, "node_modules/.bin/tsx"),
     args: ["--tsconfig", "tsconfig.mcp.json", "src/mcp/server.ts"],
@@ -131,6 +165,7 @@ beforeAll(async () => {
       DATABASE_URL: process.env.DATABASE_URL ?? "",
       MCP_ACTOR_EMAIL: EMAIL,
       SHIKIMORI_BASE_URL: `http://127.0.0.1:${port}`,
+      MCP_LOCAL_MEDIA_DIRS: ostDir,
     },
     stderr: "inherit",
   });
@@ -153,7 +188,8 @@ describe("MCP server end-to-end (Madhouse scenario)", () => {
       "shikimori_search", "import_shikimori_poster", "import_youtube_audio",
       "shikimori_find_user", "shikimori_user_anime_list", "shikimori_user_favourites",
       "create_picker_project", "add_round", "add_tile", "add_tile_from_shikimori",
-      "set_playlist", "get_project",
+      "set_playlist", "get_project", "set_project",
+      "list_pool", "list_local_media", "import_local_media",
     ]) {
       expect(names).toContain(n);
     }
@@ -270,5 +306,84 @@ describe("MCP server end-to-end (Madhouse scenario)", () => {
     expect(summary.rounds[1].tiles.map((t: { label: string }) => t.label)).toEqual([
       "Лайт", "Тетрадь смерти",
     ]);
+  }, 60_000);
+
+  it("dresses a picker up: local OST -> playlist, pool art -> background", async () => {
+    const { projectId, firstRoundId } = await call("create_picker_project", {
+      title: "Оформление",
+    });
+    await call("add_tile_from_shikimori", {
+      roundId: firstRoundId, type: "character", id: 17,
+      posterPath: "/system/characters/original/17.jpg", label: "Лайт", isAnswer: true,
+    });
+    await call("add_tile_from_shikimori", {
+      roundId: firstRoundId, type: "character", id: 18,
+      posterPath: "/system/characters/original/18.jpg", label: "Эл",
+    });
+
+    // the allowlisted folder is visible, the folder next to it is not
+    const listed = await call("list_local_media", { dir: ostDir });
+    expect(listed.files.map((f: { name: string }) => f.name)).toEqual([
+      "01. calm.mp3", "02. calmer.mp3", "bg.jpg",
+    ]);
+    expect(listed.files[0].kind).toBe("audio");
+    await expect(call("list_local_media", { dir: secretsDir })).rejects.toThrow(
+      /PATH_NOT_ALLOWED/,
+    );
+
+    // import two tracks + a background image, originals stay on disk
+    const imported = await call("import_local_media", {
+      paths: [
+        `${ostDir}/01. calm.mp3`,
+        `${ostDir}/02. calmer.mp3`,
+        `${ostDir}/bg.jpg`,
+        `${secretsDir}/passwords.mp3`,
+      ],
+    });
+    expect(imported.failed).toEqual([
+      { path: `${secretsDir}/passwords.mp3`, error: "PATH_NOT_ALLOWED" },
+    ]);
+    expect(imported.items).toHaveLength(3);
+    expect(existsSync(`${ostDir}/01. calm.mp3`)).toBe(true);
+
+    const tracks = imported.items.filter((i: { kind: string }) => i.kind === "audio");
+    const bg = imported.items.find((i: { kind: string }) => i.kind === "image")!;
+    expect(tracks[0].label).toBe("01. calm");
+    expect(tracks[0].durationSec).toBeGreaterThan(0.5);
+
+    // the pool is browsable, so an agent can reuse what is already there
+    const pool = await call("list_pool", { kind: "audio", query: "calm" });
+    expect(pool.arts.map((a: { id: string }) => a.id).sort()).toEqual(
+      tracks.map((t: { artId: string }) => t.artId).sort(),
+    );
+    expect(pool.arts[0].filePath).toContain("arts/");
+
+    await call("set_playlist", {
+      projectId,
+      artIds: tracks.map((t: { artId: string }) => t.artId),
+    });
+    await call("set_project", { projectId, backgroundArtId: bg.artId, timerSec: 7 });
+
+    const summary = await call("get_project", { projectId });
+    expect(summary.background).toMatchObject({ artId: bg.artId, kind: "image" });
+    expect(summary.playlist.map((p: { artId: string }) => p.artId)).toEqual(
+      tracks.map((t: { artId: string }) => t.artId),
+    );
+    expect(summary.playlistSec).toBeGreaterThan(1);
+    // the plan length is reported so the playlist can be sized to the video
+    expect(summary.durationSec).toBeGreaterThan(0);
+
+    const proj = await prisma.videoProject.findUniqueOrThrow({ where: { id: projectId } });
+    expect(proj.bgArtId).toBe(bg.artId);
+    expect(proj.timerSec).toBe(7);
+
+    // backgroundArtId: null clears the background again
+    await call("set_project", { projectId, backgroundArtId: null });
+    expect((await call("get_project", { projectId })).background).toBeNull();
+
+    // a track cannot serve as a background (kind guard of the service layer)
+    await expect(
+      call("set_project", { projectId, backgroundArtId: tracks[0].artId }),
+    ).rejects.toThrow(/BAD_BG/);
   }, 60_000);
 });

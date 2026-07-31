@@ -8,7 +8,13 @@ export interface ProjectSummary {
   /** Title / final card texts; null = the card is off. */
   intro: string | null;
   outro: string | null;
-  playlist: { artId: string; label: string | null }[];
+  /** Project-wide background (rounds may override it); null = plain dark. */
+  background: { artId: string; label: string | null; kind: string } | null;
+  playlist: { artId: string; label: string | null; durationSec: number | null }[];
+  /** Total length of the playlist, to compare against `durationSec`. */
+  playlistSec: number;
+  /** Planned runtime of the video, when the caller computed the plan. */
+  durationSec?: number;
   rounds: {
     id: string;
     order: number;
@@ -18,7 +24,15 @@ export interface ProjectSummary {
 }
 
 /** Compact, agent-friendly view of a project for the get_project tool. */
-export function projectSummary(p: LoadedProject): ProjectSummary {
+export function projectSummary(
+  p: LoadedProject,
+  opts: { durationSec?: number } = {},
+): ProjectSummary {
+  const playlist = p.playlist.map((pl) => ({
+    artId: pl.artId,
+    label: pl.art.label,
+    durationSec: pl.art.durationSec,
+  }));
   return {
     id: p.id,
     title: p.title,
@@ -26,7 +40,12 @@ export function projectSummary(p: LoadedProject): ProjectSummary {
     url: `/projects/${p.id}`,
     intro: p.introEnabled ? p.introText?.trim() || p.title : null,
     outro: p.outroEnabled ? p.outroText?.trim() || OUTRO_FALLBACK : null,
-    playlist: p.playlist.map((pl) => ({ artId: pl.artId, label: pl.art.label })),
+    background: p.bgArt
+      ? { artId: p.bgArt.id, label: p.bgArt.label, kind: p.bgArt.kind }
+      : null,
+    playlist,
+    playlistSec: playlist.reduce((sum, t) => sum + (t.durationSec ?? 0), 0),
+    ...(opts.durationSec !== undefined ? { durationSec: opts.durationSec } : {}),
     rounds: p.rounds.map((r) => ({
       id: r.id,
       order: r.order,

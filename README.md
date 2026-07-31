@@ -180,9 +180,16 @@ MCP-сервер действует от имени одного аккаунт�
 ```bash
 # .env
 MCP_ACTOR_EMAIL="you@example.com"   # email уже зарегистрированного аккаунта
+# необязательно: папки, из которых ИИ может забирать медиа с диска (через ':')
+MCP_LOCAL_MEDIA_DIRS="~/Музыка/ost:~/Картинки/фоны"
 
 npm run mcp
 ```
+
+Без `MCP_LOCAL_MEDIA_DIRS` инструменты `list_local_media`/`import_local_media`
+отвечают `LOCAL_MEDIA_DISABLED`: доступа к диску по умолчанию нет. Путь вне
+разрешённых папок (в том числе через `..` или симлинк) — `PATH_NOT_ALLOWED`.
+Оригиналы файлов не перемещаются: в пул уходит копия.
 
 Права и квоты берутся из роли этого аккаунта (импорт требует роль с
 `media:upload`; размер пула ограничен квотой роли).
@@ -215,6 +222,9 @@ npm run mcp
 | `shikimori_find_user` | пользователь по нику (или числовому id) | `{id, nickname, url, avatarUrl}` |
 | `shikimori_user_anime_list` | список аниме пользователя с **его** оценками и статусами; фильтры `status` (`planned`/`watching`/`rewatching`/`completed`/`on_hold`/`dropped`/`all`), `minScore`, порядок `score`/`updated`/`name`, `limit` ≤ 500 | `{user, total, countsByStatus, matched, items:[{id, label, kind, posterPath, userScore, status, episodes, rewatches, updatedAt}]}` |
 | `shikimori_user_favourites` | избранное пользователя: аниме и персонажи (пути постеров готовы к импорту) | `{user, animes, characters}` |
+| `list_pool` | что уже лежит в пуле (фильтры `kind`/`query`, `filePath` абсолютный) | `{arts:[{id, label, kind, durationSec, hasAudio, sizeBytes, filePath, createdAt}], nextCursor}` |
+| `list_local_media` | медиа-файлы папки на диске (только из `MCP_LOCAL_MEDIA_DIRS`) | `{dir, roots, files:[{name, path, kind, sizeBytes}]}` |
+| `import_local_media` | импорт локальных файлов в пул (оригиналы остаются на месте, ≤ 50 за вызов) | `{items:[{artId, label, kind, durationSec, sizeBytes}], failed:[{path, error}]}` |
 | `import_shikimori_poster` | импорт постера в пул как картинку | `{artId}` |
 | `import_youtube_audio` | скачать звук с YouTube (yt-dlp) в пул | `{artId}` |
 | `create_picker_project` | создать пикер (уже с 1 пустым раундом); опционально `orientation: "landscape"|"portrait"` — дефолт ориентации плиток проекта, `introText`/`outroText` — тексты титульного и финального экранов (пустая строка выключает экран) | `{projectId, firstRoundId}` |
@@ -224,7 +234,8 @@ npm run mcp
 | `add_tile` | плитка из готового арта; опционально `fitMode: "cover"|"fill"|"contain"` | `{tileId}` |
 | `add_tile_from_shikimori` | импорт постера + плитка одним вызовом; опционально `fitMode` | `{tileId, artId}` |
 | `set_playlist` | фоновая музыка пикера | `{ok}` |
-| `get_project` | структура проекта для самопроверки (в т.ч. тексты `intro`/`outro`) | `summary` |
+| `set_project` | сам проект: задний фон (`backgroundArtId`, `null` снимает), название, ориентация, тексты интро/аутро, `revealSec`/`timerSec`/`hideAfterReveal`/`tickSound` | `{ok}` |
+| `get_project` | структура проекта для самопроверки (тексты `intro`/`outro`, `background`, `playlistSec` и плановый `durationSec`) | `summary` |
 
 ### Пример сценария (студия Madhouse, 4 варианта, 10 раундов)
 
@@ -245,6 +256,15 @@ npm run mcp
 раундам. `shikimori_user_favourites` даёт избранных персонажей и аниме того же
 пользователя — их постеры импортируются напрямую. Сводка `countsByStatus`
 показывает, сколько у человека просмотрено/запланировано/отложено/брошено.
+
+### Пример сценария «оформи пикер»
+
+Попросите ИИ: «Поставь фоном картинку с зонтиком из пула и подбери спокойный
+плейлист под хронометраж». ИИ вызывает `get_project` (там плановый
+`durationSec`), `list_pool({kind:"image"})` для фона →
+`set_project({backgroundArtId})`, затем `list_local_media({dir})` →
+`import_local_media({paths})` → `set_playlist({artIds})` и сверяет
+`playlistSec` с `durationSec`.
 
 ## Тесты
 

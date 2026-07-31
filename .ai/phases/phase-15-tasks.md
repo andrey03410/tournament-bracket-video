@@ -21,15 +21,17 @@
 
 ## Задачи
 
-- [ ] **Task 1: Политика доступа.** `lib/domain/local-media.ts`
+- [x] **Task 1: Политика доступа.** `lib/domain/local-media.ts`
   (`parseMediaDirs`, `resolveInsideDirs`, `localMediaKind`) + юнит-тесты;
   `IMG_EXT` переезжает в `lib/upload.ts` и реэкспортируется из `server/arts.ts`.
-- [ ] **Task 2: Сервис.** `server/local-media.ts`: `mediaDirs`, `listLocalMedia`,
+- [x] **Task 2: Сервис.** `server/local-media.ts`: `mediaDirs`, `listLocalMedia`,
   `importLocalMedia` (`{items, failed}`), уборка temp-копий при ошибке.
-- [ ] **Task 3: Инструменты MCP.** `list_pool`, `list_local_media`,
+- [x] **Task 3: Инструменты MCP.** `list_pool`, `list_local_media`,
   `import_local_media`, `set_project` (в т.ч. `backgroundArtId`).
-- [ ] **Task 4: Тесты.** Юнит + интеграция на реальных файлах + MCP e2e через
+- [x] **Task 4: Тесты.** Юнит + интеграция на реальных файлах + MCP e2e через
   stdio-клиент; `.env.example` и README получают `MCP_LOCAL_MEDIA_DIRS`.
-- [ ] **Task 5: Живая проверка.** Через MCP оформить «Kiss / Marry / Kill —
-  30 раундов»: фон «Нагиса с зонтиком» из пула, плейлист Key под 9:12
-  (Summertime → Summer Lights → Nagisa), сверить план превью и кадры рендера.
+- [x] **Task 5: Живая проверка.** Через MCP оформлен «Kiss / Marry / Kill —
+  30 раундов»: фон «Нагиса с зонтиком» из пула (все 30 раундов наследуют его),
+  плейлист под фактические 6:42 (таймер стал 5 сек): Everyday Leisure 1:51 →
+  Summertime 2:44 → Summer Lights 2:58 = 7:33, три кюя без лупа; оригиналы
+  файлов в папке ost на месте.
