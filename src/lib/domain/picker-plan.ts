@@ -3,7 +3,13 @@
 
 import type { ArtCrop, FitMode } from "./art-crop";
 import { resolveFootage } from "./position-media";
-import { pickerLayout, type TileRect, type TileOrientation } from "./picker-layout";
+import {
+  pickerLayout,
+  groupLayout,
+  MIN_GROUPS,
+  type TileRect,
+  type TileOrientation,
+} from "./picker-layout";
 import type { SegmentVisual } from "./video-plan";
 
 export const FPS = 30;
@@ -16,6 +22,7 @@ export const NO_PROMPT_INTRO_SEC = 0.5;
 export const ANSWER_SEC = 2.5; // answer-highlight phase
 export const ROUND_GAP_SEC = 0.7; // dark gap between rounds
 export const MUSIC_FADE_SEC = 1; // playlist crossfade (and loop) length
+export const GROUP_STAGGER_SEC = 0.15; // cascade between cards inside one block
 export const BOOKEND_SEC = 3; // title / final card length (same as tops)
 
 export type LabelsMode = "always" | "finale" | "never";
@@ -46,6 +53,15 @@ export interface PlanTileInput {
   fitMode: FitMode;
 }
 
+export type RoundMode = "single" | "groups";
+
+/** One block of a group-comparison round (spec 16). */
+export interface PlanGroupInput {
+  label: string | null;
+  isAnswer: boolean;
+  tiles: PlanTileInput[];
+}
+
 export interface PlanRoundInput {
   prompt: string | null;
   showPrompt: boolean;
@@ -57,6 +73,10 @@ export interface PlanRoundInput {
   bgMusic: { ref: string; durationSec: number | null } | null;
   orientation: TileOrientation;
   tiles: PlanTileInput[];
+  /** "single" (default) = plain tiles; "groups" = block against block. */
+  mode?: RoundMode;
+  /** Blocks of a group round (2-3, each 1-5 cards); ignored in single mode. */
+  groups?: PlanGroupInput[];
 }
 
 export interface PlanTile {
@@ -129,12 +149,28 @@ export function buildMusicCues(
   return cues;
 }
 
+/** A laid-out block: panel rect, its own reveal window and its cards. */
+export interface PlanGroup {
+  index: number;
+  label: string | null;
+  isAnswer: boolean;
+  panel: TileRect;
+  revealAtSec: number;
+  /** End of the block window; null = stays visible until the finale. */
+  hideAtSec: number | null;
+  tiles: PlanTile[];
+}
+
 export interface PlanRound {
   index: number;
   startSec: number;
   endSec: number;
   prompt: string | null; // null when hidden
+  mode: RoundMode;
+  /** Plain tiles of a single-mode round (empty in group mode). */
   tiles: PlanTile[];
+  /** Blocks of a group round (empty in single mode). */
+  groups: PlanGroup[];
   finaleAtSec: number;
   timerSec: number;
   tickSound: boolean;
@@ -179,6 +215,97 @@ export interface PickerPlan {
   outro: PlanBookend | null;
 }
 
+/** Everything the tile math needs beyond the input itself. */
+interface TileContext {
+  rect: TileRect;
+  revealAtSec: number;
+  /** End of the tile's own window; null = visible until the finale. */
+  hideAtSec: number | null;
+  /** Footage / sound window length. */
+  windowSec: number;
+  labelsMode: LabelsMode;
+  /** May this card carry its own sound (a block gives it to one card only)? */
+  withSound: boolean;
+}
+
+function planTile(
+  tile: PlanTileInput,
+  ctx: TileContext,
+): { tile: PlanTile; duck: { fromSec: number; toSec: number } | null } {
+  const start = Math.max(0, tile.startSec ?? 0);
+  const footage =
+    tile.media.kind === "video"
+      ? resolveFootage(start, tile.media.durationSec, ctx.windowSec)
+      : { startSec: 0, loopSec: null };
+  const visual: SegmentVisual = {
+    kind: tile.media.kind,
+    path: tile.media.ref,
+    crop: tile.crop,
+    startSec: footage.startSec,
+    loopSec: footage.loopSec,
+    fitMode: tile.fitMode,
+  };
+
+  let sound: PlanTile["sound"] = null;
+  let duck: { fromSec: number; toSec: number } | null = null;
+  if (ctx.withSound && tile.media.kind === "video" && tile.playSound && tile.media.hasAudio) {
+    const available =
+      tile.media.durationSec != null
+        ? Math.max(0, tile.media.durationSec - footage.startSec)
+        : ctx.windowSec;
+    const durationSec = Math.min(ctx.windowSec, available);
+    if (durationSec > 0.05) {
+      sound = {
+        fromSec: ctx.revealAtSec,
+        durationSec,
+        ref: tile.media.ref,
+        startSec: footage.startSec,
+      };
+      duck = { fromSec: ctx.revealAtSec, toSec: ctx.revealAtSec + durationSec };
+    }
+  }
+
+  return {
+    tile: {
+      rect: ctx.rect,
+      visual,
+      posterRef: tile.media.posterRef,
+      label: tile.label?.trim() || null,
+      isAnswer: tile.isAnswer,
+      revealAtSec: ctx.revealAtSec,
+      hideAtSec: ctx.hideAtSec,
+      sound,
+      showLabelDuringReveal: ctx.labelsMode === "always",
+      showLabelAtFinale: ctx.labelsMode !== "never",
+    },
+    duck,
+  };
+}
+
+/** Blocks of a group round, or [] when the round is a plain one. */
+function roundGroups(round: PlanRoundInput): PlanGroupInput[] {
+  return round.mode === "groups" ? (round.groups ?? []) : [];
+}
+
+/**
+ * Can this round appear in the video at all? A plain round needs a tile; a
+ * group round needs at least two blocks with a card in each (while it is being
+ * assembled the constructor shows a hint instead).
+ */
+export function planRoundRenderable(round: PlanRoundInput): boolean {
+  if (round.mode === "groups") {
+    const groups = roundGroups(round);
+    return groups.length >= MIN_GROUPS && groups.every((g) => g.tiles.length > 0);
+  }
+  return round.tiles.length > 0;
+}
+
+/** Cascade step inside a block: 0.15 s, squeezed to fit a short reveal window. */
+function staggerSec(cards: number, revealSec: number): number {
+  if (cards < 2) return 0;
+  return Math.max(0, Math.min(GROUP_STAGGER_SEC, (revealSec - 0.2) / (cards - 1)));
+}
+
 export function buildPickerPlan(
   defaults: PickerDefaults,
   rounds: PlanRoundInput[],
@@ -187,7 +314,7 @@ export function buildPickerPlan(
 ): PickerPlan {
   // Bookends only make sense around real content: a project with no renderable
   // round stays an empty timeline (the constructor shows a hint instead).
-  const hasContent = rounds.some((r) => r.tiles.length > 0);
+  const hasContent = rounds.some(planRoundRenderable);
   const introSec = hasContent && bookends.intro ? BOOKEND_SEC : 0;
   const outroSec = hasContent && bookends.outro ? BOOKEND_SEC : 0;
 
@@ -195,77 +322,94 @@ export function buildPickerPlan(
   const planRounds: PlanRound[] = [];
 
   rounds.forEach((round, index) => {
-    if (round.tiles.length === 0) return; // nothing to show — skipped entirely
+    if (!planRoundRenderable(round)) return; // nothing to show — skipped entirely
 
+    const mode: RoundMode = round.mode === "groups" ? "groups" : "single";
     const revealSec = round.revealSec ?? defaults.revealSec;
     const hideAfter = round.hideAfterReveal ?? defaults.hideAfterReveal;
     const timerSec = round.timerSec ?? defaults.timerSec;
-    const rects = pickerLayout(Math.max(2, Math.min(9, round.tiles.length)), round.orientation);
 
     const startSec = cursor;
     const promptShown = round.showPrompt && !!round.prompt?.trim();
-    const introSec = promptShown ? PROMPT_INTRO_SEC : NO_PROMPT_INTRO_SEC;
-    const finaleAtSec = startSec + introSec + round.tiles.length * revealSec;
-    const hasAnswer = round.tiles.some((t) => t.isAnswer);
-    const answerAtSec = hasAnswer ? finaleAtSec + timerSec : null;
-    const endSec =
-      finaleAtSec + timerSec + (hasAnswer ? ANSWER_SEC : 0) + ROUND_GAP_SEC;
-
+    const leadSec = promptShown ? PROMPT_INTRO_SEC : NO_PROMPT_INTRO_SEC;
     const duckWindows: { fromSec: number; toSec: number }[] = [];
-    const tiles: PlanTile[] = round.tiles.map((tile, i) => {
-      const revealAtSec = startSec + introSec + i * revealSec;
-      const start = Math.max(0, tile.startSec ?? 0);
-      const footage =
-        tile.media.kind === "video"
-          ? resolveFootage(start, tile.media.durationSec, revealSec)
-          : { startSec: 0, loopSec: null };
-      const visual: SegmentVisual = {
-        kind: tile.media.kind,
-        path: tile.media.ref,
-        crop: tile.crop,
-        startSec: footage.startSec,
-        loopSec: footage.loopSec,
-        fitMode: tile.fitMode,
-      };
 
-      let sound: PlanTile["sound"] = null;
-      if (tile.media.kind === "video" && tile.playSound && tile.media.hasAudio) {
-        const available =
-          tile.media.durationSec != null
-            ? Math.max(0, tile.media.durationSec - footage.startSec)
-            : revealSec;
-        const durationSec = Math.min(revealSec, available);
-        if (durationSec > 0.05) {
-          sound = {
-            fromSec: revealAtSec,
-            durationSec,
-            ref: tile.media.ref,
-            startSec: footage.startSec,
-          };
-          duckWindows.push({ fromSec: revealAtSec, toSec: revealAtSec + durationSec });
-        }
-      }
+    let tiles: PlanTile[] = [];
+    let groups: PlanGroup[] = [];
+    let steps: number; // how many reveal windows the round takes
+    let hasAnswer: boolean;
 
-      return {
-        rect: rects[i],
-        visual,
-        posterRef: tile.media.posterRef,
-        label: tile.label?.trim() || null,
-        isAnswer: tile.isAnswer,
-        revealAtSec,
-        hideAtSec: hideAfter ? revealAtSec + revealSec : null,
-        sound,
-        showLabelDuringReveal: round.labelsMode === "always",
-        showLabelAtFinale: round.labelsMode !== "never",
-      };
-    });
+    if (mode === "groups") {
+      const blocks = roundGroups(round);
+      const layout = groupLayout(
+        blocks.map((g) => g.tiles.length),
+        round.orientation,
+      );
+      steps = blocks.length;
+      hasAnswer = blocks.some((g) => g.isAnswer);
+      groups = blocks.map((block, gi) => {
+        const revealAtSec = startSec + leadSec + gi * revealSec;
+        const hideAtSec = hideAfter ? revealAtSec + revealSec : null;
+        const step = staggerSec(block.tiles.length, revealSec);
+        // The whole block ducks the music once: only its first sounded card
+        // actually plays, otherwise 3-5 videos turn into noise.
+        let soundTaken = false;
+        const cards = block.tiles.map((card, ci) => {
+          const planned = planTile(card, {
+            rect: layout.cards[gi][ci],
+            revealAtSec: revealAtSec + ci * step,
+            hideAtSec,
+            windowSec: revealSec,
+            labelsMode: round.labelsMode,
+            withSound: !soundTaken,
+          });
+          if (planned.duck) {
+            soundTaken = true;
+            duckWindows.push(planned.duck);
+          }
+          return planned.tile;
+        });
+        return {
+          index: gi,
+          label: block.label?.trim() || null,
+          isAnswer: block.isAnswer,
+          panel: layout.panels[gi],
+          revealAtSec,
+          hideAtSec,
+          tiles: cards,
+        };
+      });
+    } else {
+      const rects = pickerLayout(Math.max(2, Math.min(9, round.tiles.length)), round.orientation);
+      steps = round.tiles.length;
+      hasAnswer = round.tiles.some((t) => t.isAnswer);
+      tiles = round.tiles.map((tile, i) => {
+        const revealAtSec = startSec + leadSec + i * revealSec;
+        const planned = planTile(tile, {
+          rect: rects[i],
+          revealAtSec,
+          hideAtSec: hideAfter ? revealAtSec + revealSec : null,
+          windowSec: revealSec,
+          labelsMode: round.labelsMode,
+          withSound: true,
+        });
+        if (planned.duck) duckWindows.push(planned.duck);
+        return planned.tile;
+      });
+    }
+
+    const finaleAtSec = startSec + leadSec + steps * revealSec;
+    const answerAtSec = hasAnswer ? finaleAtSec + timerSec : null;
+    const endSec = finaleAtSec + timerSec + (hasAnswer ? ANSWER_SEC : 0) + ROUND_GAP_SEC;
 
     planRounds.push({
       index,
       startSec,
       endSec,
       prompt: promptShown ? round.prompt!.trim() : null,
+      mode,
       tiles,
+      groups,
       finaleAtSec,
       timerSec,
       tickSound: defaults.tickSound,

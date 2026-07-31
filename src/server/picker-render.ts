@@ -18,6 +18,7 @@ import {
   type PickerDefaults,
   type PlanRoundInput,
   type PlanTileInput,
+  type RoundMode,
 } from "@/lib/domain/picker-plan";
 import { describeRenderError } from "@/server/render";
 import { effectivePlaylist, OUTRO_FALLBACK, type LoadedProject } from "@/server/projects";
@@ -91,11 +92,36 @@ function urlBg(art: ArtRef | null) {
   };
 }
 
+/** One pool card as a plan tile over /api URLs. */
+function urlTile(t: LoadedTile): PlanTileInput {
+  return {
+    media: {
+      kind: t.art.kind as "image" | "video",
+      ref: `/api/arts/${t.artId}`,
+      posterRef: t.art.posterPath ? `/api/arts/${t.artId}?poster=1` : null,
+      durationSec: t.art.durationSec,
+      hasAudio: t.art.hasAudio,
+    },
+    crop: tileCrop(t),
+    startSec: t.startSec,
+    label: t.label,
+    isAnswer: t.isAnswer,
+    playSound: t.playSound,
+    fitMode: t.fitMode as FitMode,
+  };
+}
+
 /** Preview plan over /api URLs for the in-browser Player. */
 export function buildPickerPreviewPlan(project: LoadedProject) {
   const rounds: PlanRoundInput[] = project.rounds.map((round) => {
     const { bgArt, bgMusicArt } = roundArts(project, round);
     return {
+      mode: round.mode as RoundMode,
+      groups: round.groups.map((g) => ({
+        label: g.label,
+        isAnswer: g.isAnswer,
+        tiles: g.tiles.map(urlTile),
+      })),
       prompt: round.prompt,
       showPrompt: round.showPrompt,
       labelsMode: round.labelsMode as LabelsMode,
@@ -110,21 +136,7 @@ export function buildPickerPreviewPlan(project: LoadedProject) {
         round.tileOrientation as TileOrientation | null,
         project.tileOrientation as TileOrientation,
       ),
-      tiles: round.tiles.map((t) => ({
-        media: {
-          kind: t.art.kind as "image" | "video",
-          ref: `/api/arts/${t.artId}`,
-          posterRef: t.art.posterPath ? `/api/arts/${t.artId}?poster=1` : null,
-          durationSec: t.art.durationSec,
-          hasAudio: t.art.hasAudio,
-        },
-        crop: tileCrop(t),
-        startSec: t.startSec,
-        label: t.label,
-        isAnswer: t.isAnswer,
-        playSound: t.playSound,
-        fitMode: t.fitMode as FitMode,
-      })),
+      tiles: round.tiles.filter((t) => !t.groupId).map(urlTile),
     };
   });
   const playlist = effectivePlaylist(project).map((a) => ({

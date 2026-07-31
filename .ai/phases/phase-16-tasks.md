@@ -29,7 +29,7 @@
   `PickerTile.groupId`; `setRoundMode`, `addGroup`, `patchGroup`, `deleteGroup`,
   `moveTileToGroup`, `addTile` в блок; лимиты + `invalidRounds`. Интеграционные
   тесты на реальной БД.
-- [ ] **Task 3: Таймлайн.** `PlanRound.mode`/`groups` и математика группового
+- [x] **Task 3: Таймлайн.** `PlanRound.mode`/`groups` и математика группового
   раунда в `lib/domain/picker-plan.ts` + `buildPickerPreviewPlan` + юнит-тесты.
 - [ ] **Task 4: Кадр.** Панель блока (рамка, название, свечение ответа), знак VS,
   каскад карточек в `remotion/PickerVideo.tsx`; подготовка ассетов по блокам в

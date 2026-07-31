@@ -8,6 +8,7 @@ import {
   PROMPT_INTRO_SEC,
   NO_PROMPT_INTRO_SEC,
   ROUND_GAP_SEC,
+  GROUP_STAGGER_SEC,
   type PickerDefaults,
   type PlanRoundInput,
   type PlanTileInput,
@@ -366,5 +367,161 @@ describe("buildPickerPlan orientation & fitMode", () => {
     expect((r0.w / r0.h) * (16 / 9)).toBeCloseTo(2 / 3, 2);
     expect(round.tiles[0].visual.fitMode).toBe("contain");
     expect(round.tiles[1].visual.fitMode).toBe("cover");
+  });
+});
+
+// ---- Phase 16: group comparison rounds ----
+
+function groupRound(
+  blocks: PlanTileInput[][],
+  over: Partial<PlanRoundInput> = {},
+): PlanRoundInput {
+  return round([], {
+    mode: "groups",
+    groups: blocks.map((tiles, i) => ({
+      label: i === 0 ? "Тройка А" : null,
+      isAnswer: false,
+      tiles,
+    })),
+    ...over,
+  });
+}
+
+describe("buildPickerPlan group rounds", () => {
+  it("steps the timeline by block, not by card", () => {
+    const plan = buildPickerPlan(DEFAULTS, [
+      groupRound([[imageTile(), imageTile(), imageTile()], [imageTile(), imageTile()]]),
+    ]);
+    const r = plan.rounds[0];
+    expect(r.mode).toBe("groups");
+    expect(r.tiles).toEqual([]); // cards live inside the blocks
+    expect(r.groups.map((g) => g.revealAtSec)).toEqual([
+      PROMPT_INTRO_SEC,
+      PROMPT_INTRO_SEC + DEFAULTS.revealSec,
+    ]);
+    // two blocks * revealSec, not five cards * revealSec
+    expect(r.finaleAtSec).toBeCloseTo(PROMPT_INTRO_SEC + 2 * DEFAULTS.revealSec, 10);
+    expect(r.endSec).toBeCloseTo(r.finaleAtSec + DEFAULTS.timerSec + ROUND_GAP_SEC, 10);
+  });
+
+  it("cascades the cards inside a block and keeps them within the block window", () => {
+    const plan = buildPickerPlan(DEFAULTS, [
+      groupRound([[imageTile(), imageTile(), imageTile()], [imageTile()]]),
+    ]);
+    const first = plan.rounds[0].groups[0];
+    const offsets = first.tiles.map((t) => t.revealAtSec - first.revealAtSec);
+    offsets.forEach((off, i) => expect(off).toBeCloseTo(i * GROUP_STAGGER_SEC, 10));
+    for (const off of offsets) expect(off).toBeLessThan(DEFAULTS.revealSec);
+    // a single-card block has no cascade
+    expect(plan.rounds[0].groups[1].tiles[0].revealAtSec).toBe(
+      plan.rounds[0].groups[1].revealAtSec,
+    );
+  });
+
+  it("squeezes the cascade into a short reveal window", () => {
+    const plan = buildPickerPlan({ ...DEFAULTS, revealSec: 0.6 }, [
+      groupRound([[imageTile(), imageTile(), imageTile(), imageTile(), imageTile()], [imageTile()]]),
+    ]);
+    const g = plan.rounds[0].groups[0];
+    const last = g.tiles[4].revealAtSec - g.revealAtSec;
+    expect(last).toBeLessThanOrEqual(0.6 - 0.2 + 1e-9);
+    expect(last).toBeGreaterThan(0);
+  });
+
+  it("hideAfterReveal hides the whole block, otherwise cards stay to the finale", () => {
+    const hidden = buildPickerPlan({ ...DEFAULTS, hideAfterReveal: true }, [
+      groupRound([[imageTile(), imageTile()], [imageTile()]]),
+    ]).rounds[0];
+    expect(hidden.groups[0].hideAtSec).toBeCloseTo(
+      hidden.groups[0].revealAtSec + DEFAULTS.revealSec,
+      10,
+    );
+    for (const t of hidden.groups[0].tiles) expect(t.hideAtSec).toBe(hidden.groups[0].hideAtSec);
+
+    const kept = buildPickerPlan(DEFAULTS, [
+      groupRound([[imageTile(), imageTile()], [imageTile()]]),
+    ]).rounds[0];
+    expect(kept.groups[0].hideAtSec).toBeNull();
+  });
+
+  it("lays panels and cards out through groupLayout (uniform card size)", () => {
+    const r = buildPickerPlan(DEFAULTS, [
+      groupRound([[imageTile(), imageTile(), imageTile()], [imageTile(), imageTile()]]),
+    ]).rounds[0];
+    expect(r.groups).toHaveLength(2);
+    expect(r.groups[0].panel.w).toBeGreaterThan(r.groups[1].panel.w);
+    const sizes = new Set(
+      r.groups.flatMap((g) => g.tiles.map((t) => `${t.rect.w.toFixed(9)}x${t.rect.h.toFixed(9)}`)),
+    );
+    expect(sizes.size).toBe(1);
+    expect(r.groups[0].label).toBe("Тройка А");
+    expect(r.groups[1].label).toBeNull(); // the frame falls back to «Блок Б»
+  });
+
+  it("marks the winning block and dims nothing when no block is marked", () => {
+    const withAnswer = buildPickerPlan(DEFAULTS, [
+      groupRound([[imageTile()], [imageTile()]], {
+        mode: "groups",
+        groups: [
+          { label: null, isAnswer: false, tiles: [imageTile()] },
+          { label: null, isAnswer: true, tiles: [imageTile()] },
+        ],
+      }),
+    ]).rounds[0];
+    expect(withAnswer.groups.map((g) => g.isAnswer)).toEqual([false, true]);
+    expect(withAnswer.answerAtSec).toBeCloseTo(withAnswer.finaleAtSec + DEFAULTS.timerSec, 10);
+    expect(withAnswer.endSec - withAnswer.finaleAtSec).toBeCloseTo(
+      DEFAULTS.timerSec + ANSWER_SEC + ROUND_GAP_SEC,
+      10,
+    );
+
+    const plain = buildPickerPlan(DEFAULTS, [
+      groupRound([[imageTile()], [imageTile()]]),
+    ]).rounds[0];
+    expect(plain.answerAtSec).toBeNull();
+  });
+
+  it("gives one sound and one duck window per block (the first sounded card)", () => {
+    const r = buildPickerPlan(DEFAULTS, [
+      groupRound([
+        [videoTile(10), videoTile(10), imageTile()],
+        [imageTile(), videoTile(10, { playSound: false })],
+      ]),
+    ]).rounds[0];
+    const sounded = r.groups[0].tiles.filter((t) => t.sound);
+    expect(sounded).toHaveLength(1);
+    expect(sounded[0].sound!.fromSec).toBe(r.groups[0].tiles[0].revealAtSec);
+    expect(r.groups[1].tiles.some((t) => t.sound)).toBe(false);
+    expect(r.duckWindows).toHaveLength(1);
+  });
+
+  it("skips a group round that is not renderable yet (one block or an empty block)", () => {
+    const oneBlock = buildPickerPlan(DEFAULTS, [groupRound([[imageTile(), imageTile()]])]);
+    expect(oneBlock.rounds).toEqual([]);
+    expect(oneBlock.durationSec).toBe(1);
+
+    const emptyBlock = buildPickerPlan(DEFAULTS, [groupRound([[imageTile()], []])]);
+    expect(emptyBlock.rounds).toEqual([]);
+
+    // ...and such a round does not earn the project its bookends either
+    const withCards = buildPickerPlan(
+      DEFAULTS,
+      [groupRound([[imageTile()], []])],
+      [],
+      { intro: { text: "Топ" }, outro: { text: "Пока" } },
+    );
+    expect(withCards.intro).toBeNull();
+  });
+
+  it("keeps a mixed project continuous: group round then single round", () => {
+    const plan = buildPickerPlan(DEFAULTS, [
+      groupRound([[imageTile()], [imageTile()]]),
+      round([imageTile(), imageTile()]),
+    ]);
+    expect(plan.rounds).toHaveLength(2);
+    expect(plan.rounds[0].mode).toBe("groups");
+    expect(plan.rounds[1].mode).toBe("single");
+    expect(plan.rounds[1].startSec).toBeCloseTo(plan.rounds[0].endSec, 10);
+    expect(plan.durationSec).toBeCloseTo(plan.rounds[1].endSec, 10);
   });
 });

@@ -671,6 +671,30 @@ describe("phase 16: group rounds", () => {
     await deleteProject(userId, projectId);
   });
 
+  it("preview plan of a group round carries panels, blocks and the answer", async () => {
+    const { projectId, roundId } = await pickerWithTiles("План 2v1", 3);
+    await setRoundMode(userId, roundId, "groups");
+    let groups = (await getProject(userId, projectId))!.rounds[0].groups;
+    await moveTileToGroup(userId, groups[0].tiles[2].id, groups[1].id); // 2 vs 1
+    await patchGroup(userId, groups[1].id, { label: "Одиночка", isAnswer: true });
+
+    const plan = buildPickerPreviewPlan((await getProject(userId, projectId))!);
+    expect(plan.rounds).toHaveLength(1);
+    const r = plan.rounds[0];
+    expect(r.mode).toBe("groups");
+    expect(r.tiles).toEqual([]);
+    expect(r.groups.map((g) => g.tiles.length)).toEqual([2, 1]);
+    expect(r.groups[1].label).toBe("Одиночка");
+    expect(r.groups[1].isAnswer).toBe(true);
+    expect(r.answerAtSec).not.toBeNull();
+    // two blocks -> two reveal windows, panels side by side
+    expect(r.groups[1].revealAtSec).toBeGreaterThan(r.groups[0].revealAtSec);
+    expect(r.groups[1].panel.x).toBeGreaterThan(r.groups[0].panel.x);
+    // cards of a block point at the pool art
+    expect(r.groups[0].tiles[0].visual.path).toMatch(/^\/api\/arts\//);
+    await deleteProject(userId, projectId);
+  });
+
   it("invalidRounds: a group round needs two non-empty blocks", async () => {
     const { projectId, roundId } = await pickerWithTiles("Валидация", 3);
     await setRoundMode(userId, roundId, "groups"); // 3 cards in block 1, block 2 empty
