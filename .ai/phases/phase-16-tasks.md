@@ -22,7 +22,7 @@
 
 ## Задачи
 
-- [ ] **Task 1: Геометрия.** `groupLayout(counts, orientation)` в
+- [x] **Task 1: Геометрия.** `groupLayout(counts, orientation)` в
   `lib/domain/picker-layout.ts` + юнит-тесты (симметрия, асимметрия, выбор
   разбиения, портрет, границы зоны).
 - [ ] **Task 2: Схема и сервис.** `PickerRound.mode`, таблица `PickerGroup`,
