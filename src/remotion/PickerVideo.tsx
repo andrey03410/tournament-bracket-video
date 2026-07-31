@@ -131,6 +131,8 @@ const TileFrame: React.FC<{
     : 1;
   const scale = pop ? 0.7 + 0.3 * anim : highlight === "answer" ? 1.05 : 1;
   const { rect } = tile;
+  // 0.30 of the frame width is the widest a tile ever gets (a plain 2-tile round)
+  const fit = Math.max(0.55, Math.min(1, rect.w / 0.3));
   return (
     <div
       style={{
@@ -164,23 +166,30 @@ const TileFrame: React.FC<{
         {children}
       </div>
       {label ? (
+        // The plate scales with the card and may wrap to two lines: a card in a
+        // 2x2x2 round is a third of the width of a plain tile, and anime titles
+        // are far longer than character names.
         <div
           style={{
             position: "absolute",
             left: "50%",
-            bottom: 14,
+            bottom: Math.max(6, Math.round(14 * fit)),
             transform: "translateX(-50%)",
-            maxWidth: "92%",
-            padding: "8px 20px",
+            maxWidth: "94%",
+            padding: `${Math.round(8 * fit)}px ${Math.round(20 * fit)}px`,
             background: "rgba(10,12,18,0.85)",
             border: `2px solid ${highlight === "answer" ? ANSWER_GLOW : ACCENT}`,
             borderRadius: 12,
             color: "white",
-            fontSize: 30,
+            fontSize: Math.max(16, Math.round(30 * fit)),
+            lineHeight: 1.15,
             fontWeight: 700,
-            whiteSpace: "nowrap",
+            textAlign: "center",
+            display: "-webkit-box",
+            WebkitBoxOrient: "vertical",
+            // small cards (a 2x2x2 round) get a third line: anime titles are long
+            WebkitLineClamp: fit < 0.85 ? 3 : 2,
             overflow: "hidden",
-            textOverflow: "ellipsis",
           }}
         >
           {label}

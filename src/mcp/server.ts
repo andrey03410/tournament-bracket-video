@@ -5,7 +5,7 @@ import { resolveActor, type Actor } from "@/mcp/actor";
 import { can, quotasFor } from "@/lib/domain/permissions";
 import {
   search, findStudio, studioAnimes, animeCharacters, importPoster,
-  findUser, userAnimeList, userFavourites, characterProfile,
+  findUser, userAnimeList, userFavourites, characterProfile, animeProfile,
 } from "@/server/shikimori";
 import { USER_RATE_STATUSES } from "@/lib/domain/shikimori";
 import {
@@ -99,6 +99,15 @@ async function main() {
     { description: "Избранное пользователя: аниме и персонажи (posterPath готов для import_shikimori_poster). → {user, animes:[...], characters:[...]}",
       inputSchema: { user: z.string() } },
     ({ user }) => guard(() => userFavourites(user)),
+  );
+  server.registerTool(
+    "shikimori_anime",
+    { description:
+        "Аниме с производственными студиями (спонсоры отброшены), годом, оценкой и жанрами. " +
+        "Нужно, например, для раундов «студия против студии». " +
+        "→ {id, type:'anime', label, kind, year, score, posterPath, studios:[{id, name}], genres, facts}",
+      inputSchema: { id: z.number() } },
+    ({ id }) => guard(() => animeProfile(id)),
   );
   server.registerTool(
     "shikimori_character",

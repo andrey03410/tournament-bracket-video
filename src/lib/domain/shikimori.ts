@@ -309,6 +309,69 @@ interface RawRoleEntry {
   character?: unknown;
 }
 
+export interface AnimeStudio {
+  id: number;
+  name: string;
+}
+
+export interface AnimeProfile {
+  id: number;
+  label: string;
+  kind: string | null;
+  /** Airing year; null when the API has no date. */
+  year: number | null;
+  /** Community score; null when unrated. */
+  score: number | null;
+  posterPath: string | null;
+  /** Real production studios in API order (the first one is the primary). */
+  studios: AnimeStudio[];
+  genres: string[];
+}
+
+interface RawStudio {
+  id?: unknown;
+  name?: unknown;
+  filtered_name?: unknown;
+  real?: unknown;
+}
+
+/**
+ * Anime details from /api/animes/:id — the studio list is what a "studio vs
+ * studio" round needs; sponsors (`real: false`) are dropped.
+ */
+export function extractAnimeProfile(raw: unknown): AnimeProfile | null {
+  const h = raw as RawHit & { studios?: unknown; genres?: unknown; kind?: unknown; score?: unknown; aired_on?: unknown };
+  if (typeof h?.id !== "number") return null;
+  const label = pickLabel(str(h.russian), str(h.name));
+  if (!label) return null;
+  const studios: AnimeStudio[] = [];
+  for (const item of Array.isArray(h.studios) ? h.studios : []) {
+    const s = item as RawStudio;
+    const name = pickLabel(str(s?.filtered_name), str(s?.name));
+    if (typeof s?.id !== "number" || !name || s?.real === false) continue;
+    studios.push({ id: s.id, name });
+  }
+  const genres: string[] = [];
+  for (const item of Array.isArray(h.genres) ? h.genres : []) {
+    const g = item as { russian?: unknown; name?: unknown };
+    const name = pickLabel(str(g?.russian), str(g?.name));
+    if (name) genres.push(name);
+  }
+  const aired = str(h.aired_on);
+  const year = aired ? Number(aired.slice(0, 4)) : NaN;
+  const score = Number(str(h.score) ?? NaN);
+  return {
+    id: h.id,
+    label,
+    kind: str(h.kind),
+    year: Number.isFinite(year) ? year : null,
+    score: Number.isFinite(score) && score > 0 ? score : null,
+    posterPath: imgPath(h.image, "original"),
+    studios,
+    genres,
+  };
+}
+
 export interface CharacterAnime {
   id: number;
   label: string;

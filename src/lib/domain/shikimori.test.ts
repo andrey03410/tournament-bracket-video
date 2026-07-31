@@ -15,6 +15,7 @@ import {
   countByStatus,
   extractFavourites,
   extractCharacterProfile,
+  extractAnimeProfile,
   type UserRate,
 } from "@/lib/domain/shikimori";
 
@@ -367,5 +368,42 @@ describe("extractCharacterProfile", () => {
   it("rejects junk", () => {
     expect(extractCharacterProfile(null)).toBeNull();
     expect(extractCharacterProfile({ name: "no id" })).toBeNull();
+  });
+});
+
+describe("extractAnimeProfile", () => {
+  const raw = {
+    id: 2167,
+    name: "Clannad",
+    russian: "Кланнад",
+    kind: "tv",
+    score: "7.99",
+    aired_on: "2007-10-05",
+    image: { original: "/system/animes/original/2167.jpg", preview: "/system/animes/preview/2167.jpg" },
+    studios: [
+      { id: 2, name: "Kyoto Animation", filtered_name: "Kyoto Animation", real: true },
+      { id: 999, name: "Some Sponsor", filtered_name: "Some Sponsor", real: false },
+    ],
+    genres: [{ id: 22, russian: "Романтика" }, { id: 8, russian: "Драма" }],
+  };
+
+  it("keeps the real studios in order and the primary one first", () => {
+    const p = extractAnimeProfile(raw)!;
+    expect(p).toMatchObject({ id: 2167, label: "Кланнад", kind: "tv", year: 2007, score: 7.99,
+      posterPath: "/system/animes/original/2167.jpg" });
+    expect(p.studios).toEqual([{ id: 2, name: "Kyoto Animation" }]);
+    expect(p.genres).toEqual(["Романтика", "Драма"]);
+  });
+
+  it("survives an anime without studios or a date", () => {
+    const p = extractAnimeProfile({ id: 5, name: "Nameless", kind: "ova", studios: [] })!;
+    expect(p.studios).toEqual([]);
+    expect(p.year).toBeNull();
+    expect(p.score).toBeNull();
+  });
+
+  it("rejects junk", () => {
+    expect(extractAnimeProfile(null)).toBeNull();
+    expect(extractAnimeProfile({ name: "no id" })).toBeNull();
   });
 });

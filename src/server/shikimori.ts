@@ -22,6 +22,7 @@ import {
   type UserRateOrder,
   type UserRateStatus,
   extractCharacterProfile,
+  extractAnimeProfile,
 } from "@/lib/domain/shikimori";
 import {
   shikimoriBase,
@@ -37,6 +38,7 @@ import {
   fetchUserAnimeRatesRaw,
   fetchUserFavouritesRaw,
   fetchCharacterRaw,
+  fetchAnimeRaw,
 } from "@/lib/shikimori";
 import { createArt } from "@/server/arts";
 
@@ -114,6 +116,41 @@ export async function studioAnimes(
   const raw = await fetchStudioAnimesRaw(studioId, order, limit);
   return raw.map(mapAnimeResult).filter((r): r is AnimeResult => r != null)
     .slice(0, limit).map((r) => animeToDto(base, r));
+}
+
+export interface AnimeProfileDto {
+  id: number;
+  type: "anime";
+  label: string;
+  kind: string | null;
+  year: number | null;
+  score: number | null;
+  posterPath: string | null;
+  studios: { id: number; name: string }[];
+  genres: string[];
+  facts: string;
+}
+
+/** One anime with its production studios — the base of a "studio vs studio" round. */
+export async function animeProfile(id: number): Promise<AnimeProfileDto> {
+  const raw = await fetchAnimeRaw(id);
+  const p = extractAnimeProfile(raw);
+  if (!p) throw new Error("ANIME_NOT_FOUND");
+  const facts = [p.year, p.kind?.toUpperCase(), p.score ? `★${p.score.toFixed(2)}` : null]
+    .filter(Boolean)
+    .join(" · ");
+  return {
+    id: p.id,
+    type: "anime",
+    label: p.label,
+    kind: p.kind,
+    year: p.year,
+    score: p.score,
+    posterPath: p.posterPath && isSafeImagePath(p.posterPath) ? p.posterPath : null,
+    studios: p.studios,
+    genres: p.genres,
+    facts,
+  };
 }
 
 export interface CharacterProfileDto {

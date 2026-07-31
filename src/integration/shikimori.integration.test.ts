@@ -5,7 +5,7 @@ import { removePath } from "@/lib/storage";
 import { fetchFreshPosterUrls } from "@/lib/shikimori";
 import {
   search, importPoster, findStudio, studioAnimes, animeCharacters,
-  findUser, userAnimeList, userFavourites, characterProfile,
+  findUser, userAnimeList, userFavourites, characterProfile, animeProfile,
 } from "@/server/shikimori";
 
 // Real DB + createArt pipeline; Shikimori is a LOCAL http server pointed at via
@@ -147,6 +147,24 @@ beforeAll(async () => {
         { id: 20, name: "Naruto", russian: "Наруто", kind: "tv", score: "8.02", aired_on: "2002-10-03",
           image: { original: "/system/animes/original/20.jpg", preview: "/system/animes/preview/20.jpg" } },
       ]));
+      return;
+    }
+    if (/^\/api\/animes\/\d+$/.test(url.pathname)) {
+      const id = Number(url.pathname.split("/").pop());
+      if (id !== 2167) {
+        res.statusCode = 404;
+        return res.end("no");
+      }
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({
+        id: 2167, name: "Clannad", russian: "Кланнад", kind: "tv", score: "7.99", aired_on: "2007-10-05",
+        image: { original: "/system/animes/original/2167.jpg", preview: "/system/animes/preview/2167.jpg" },
+        studios: [
+          { id: 2, name: "Kyoto Animation", filtered_name: "Kyoto Animation", real: true },
+          { id: 777, name: "Sponsor", filtered_name: "Sponsor", real: false },
+        ],
+        genres: [{ id: 22, russian: "Романтика" }],
+      }));
       return;
     }
     if (/^\/api\/characters\/\d+$/.test(url.pathname)) {
@@ -336,6 +354,14 @@ describe("shikimori discovery", () => {
     expect(res).toHaveLength(1);
     expect(res[0]).toMatchObject({ id: 17, type: "character", label: "Лайт Ягами",
       posterPath: "/system/characters/original/17.jpg" });
+  });
+  it("anime profile carries the production studios, sponsors dropped", async () => {
+    const p = await animeProfile(2167);
+    expect(p).toMatchObject({ id: 2167, type: "anime", label: "Кланнад", kind: "tv", year: 2007, score: 7.99,
+      posterPath: "/system/animes/original/2167.jpg" });
+    expect(p.studios).toEqual([{ id: 2, name: "Kyoto Animation" }]);
+    expect(p.facts).toBe("2007 · TV · ★7.99");
+    await expect(animeProfile(404)).rejects.toThrow();
   });
   it("character profile carries the debut year, not the year of a remake", async () => {
     const p = await characterProfile(17);
