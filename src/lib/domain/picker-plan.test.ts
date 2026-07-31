@@ -9,6 +9,7 @@ import {
   NO_PROMPT_INTRO_SEC,
   ROUND_GAP_SEC,
   GROUP_STAGGER_SEC,
+  groupName,
   type PickerDefaults,
   type PlanRoundInput,
   type PlanTileInput,
@@ -386,6 +387,15 @@ function groupRound(
     ...over,
   });
 }
+
+describe("groupName", () => {
+  it("falls back to the positional name", () => {
+    expect(groupName(0, null)).toBe("Блок А");
+    expect(groupName(1, "  ")).toBe("Блок Б");
+    expect(groupName(2, "Тройка Key")).toBe("Тройка Key");
+    expect(groupName(3, null)).toBe("Блок 4");
+  });
+});
 
 describe("buildPickerPlan group rounds", () => {
   it("steps the timeline by block, not by card", () => {

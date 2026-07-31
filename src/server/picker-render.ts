@@ -18,6 +18,7 @@ import {
   type PickerDefaults,
   type PlanRoundInput,
   type PlanTileInput,
+  type PlanGroupInput,
   type RoundMode,
 } from "@/lib/domain/picker-plan";
 import { describeRenderError } from "@/server/render";
@@ -274,11 +275,13 @@ async function runPickerRender(jobId: string): Promise<void> {
       bgMusic = { ref: base, durationSec: cut };
     }
 
-    const tiles: PlanTileInput[] = [];
-    for (let ti = 0; ti < round.tiles.length; ti++) {
-      const tile = round.tiles[ti];
+    // Prepare one card's assets (clip / copy / poster / sound) under a unique
+    // basename; shared by plain tiles and the cards of a block.
+    const prepareCard = async (
+      tile: LoadedTile,
+      key: string,
+    ): Promise<PlanTileInput> => {
       const art = tile.art;
-      const key = `tile-${ri}-${ti}`;
       let media: PlanTileInput["media"];
 
       if (art.kind === "image") {
@@ -327,7 +330,7 @@ async function runPickerRender(jobId: string): Promise<void> {
         }
       }
 
-      tiles.push({
+      return {
         media,
         crop: tileCrop(tile),
         startSec: 0, // already applied by the pre-clip
@@ -335,12 +338,33 @@ async function runPickerRender(jobId: string): Promise<void> {
         isAnswer: tile.isAnswer,
         playSound: tile.playSound,
         fitMode: tile.fitMode as FitMode,
-      });
-      done++;
-      await setProgress(jobId, 0.05 + (0.4 * done) / total);
+      };
+    };
+
+    const tiles: PlanTileInput[] = [];
+    const groups: PlanGroupInput[] = [];
+    if (round.mode === "groups") {
+      for (let gi = 0; gi < round.groups.length; gi++) {
+        const group = round.groups[gi];
+        const cards: PlanTileInput[] = [];
+        for (let ti = 0; ti < group.tiles.length; ti++) {
+          cards.push(await prepareCard(group.tiles[ti], `tile-${ri}-g${gi}-${ti}`));
+          done++;
+          await setProgress(jobId, 0.05 + (0.4 * done) / total);
+        }
+        groups.push({ label: group.label, isAnswer: group.isAnswer, tiles: cards });
+      }
+    } else {
+      for (let ti = 0; ti < round.tiles.length; ti++) {
+        tiles.push(await prepareCard(round.tiles[ti], `tile-${ri}-${ti}`));
+        done++;
+        await setProgress(jobId, 0.05 + (0.4 * done) / total);
+      }
     }
 
     roundInputs.push({
+      mode: round.mode as RoundMode,
+      groups,
       prompt: round.prompt,
       showPrompt: round.showPrompt,
       labelsMode: round.labelsMode as LabelsMode,
@@ -384,9 +408,10 @@ async function runPickerRender(jobId: string): Promise<void> {
     playlistTracks,
     bookends(project),
   );
-  // Swap each sounded tile's audio ref to its pre-clipped AAC.
+  // Swap each sounded card's audio ref to its pre-clipped AAC (blocks included).
   for (const r of plan.rounds) {
-    for (const t of r.tiles) {
+    const cards = r.mode === "groups" ? r.groups.flatMap((g) => g.tiles) : r.tiles;
+    for (const t of cards) {
       if (t.sound) t.sound = { ...t.sound, ref: t.visual.path!.replace(/\.mp4$/, ".aac"), startSec: 0 };
     }
   }

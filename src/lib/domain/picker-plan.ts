@@ -27,6 +27,14 @@ export const BOOKEND_SEC = 3; // title / final card length (same as tops)
 
 export type LabelsMode = "always" | "finale" | "never";
 
+/** Positional block names used when a block has no name of its own. */
+export const GROUP_FALLBACK_NAMES = ["Блок А", "Блок Б", "Блок В"];
+
+/** Display name of a block: its own label, else the positional one. */
+export function groupName(index: number, label: string | null | undefined): string {
+  return label?.trim() || GROUP_FALLBACK_NAMES[index] || `Блок ${index + 1}`;
+}
+
 export interface PickerDefaults {
   revealSec: number;
   hideAfterReveal: boolean;

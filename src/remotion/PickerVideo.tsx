@@ -15,7 +15,9 @@ import { artCropStyle } from "@/lib/domain/art-crop";
 import { TitleCard } from "./TitleCard";
 import {
   ROUND_GAP_SEC,
+  groupName,
   type PickerPlan,
+  type PlanGroup,
   type PlanMusic,
   type PlanRound,
   type PlanTile,
@@ -34,6 +36,10 @@ function resolve(mode: AssetMode, p: string | null): string | null {
 }
 
 const sec = (s: number, fps: number) => Math.round(s * fps);
+
+/** Every card of a round, whatever the mode (blocks own them in group mode). */
+const roundTiles = (round: PlanRound): PlanTile[] =>
+  round.mode === "groups" ? round.groups.flatMap((g) => g.tiles) : round.tiles;
 
 /** Muted looping cover-background (image or video) with a dim overlay. */
 const Backdrop: React.FC<{
@@ -184,6 +190,114 @@ const TileFrame: React.FC<{
   );
 };
 
+/**
+ * Panel of one block in a group round: translucent plate, frame and the block
+ * name on top. The winning block glows gold, the losing ones fade out.
+ */
+const GroupPanel: React.FC<{
+  group: PlanGroup;
+  highlight: "answer" | "dim" | null;
+  pop: boolean;
+}> = ({ group, highlight, pop }) => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const anim = pop
+    ? interpolate(frame, [0, 0.35 * fps], [0, 1], {
+        extrapolateLeft: "clamp",
+        extrapolateRight: "clamp",
+      })
+    : 1;
+  const { panel } = group;
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: `${panel.x * 100}%`,
+        top: `${panel.y * 100}%`,
+        width: `${panel.w * 100}%`,
+        height: `${panel.h * 100}%`,
+        opacity: highlight === "dim" ? 0.3 : anim,
+        transform: `scale(${highlight === "answer" ? 1.02 : 1})`,
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          borderRadius: 26,
+          background: "rgba(9,12,19,0.5)",
+          border:
+            highlight === "answer"
+              ? `5px solid ${ANSWER_GLOW}`
+              : "3px solid rgba(255,255,255,0.16)",
+          boxShadow:
+            highlight === "answer"
+              ? `0 0 70px ${ANSWER_GLOW}`
+              : "0 14px 44px rgba(0,0,0,0.45)",
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          top: 12,
+          left: 16,
+          right: 16,
+          textAlign: "center",
+          color: highlight === "answer" ? ANSWER_GLOW : "white",
+          fontSize: 36,
+          fontWeight: 800,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+      >
+        {groupName(group.index, group.label)}
+      </div>
+    </div>
+  );
+};
+
+/** «VS» sign in the gap between two panels. */
+const VsSign: React.FC<{ left: PlanGroup["panel"]; right: PlanGroup["panel"] }> = ({
+  left,
+  right,
+}) => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const anim = interpolate(frame, [0, 0.3 * fps], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const from = left.x + left.w;
+  const width = Math.max(0.001, right.x - from);
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: `${from * 100}%`,
+        top: `${(left.y + left.h / 2) * 100}%`,
+        width: `${width * 100}%`,
+        display: "flex",
+        justifyContent: "center",
+        transform: `translateY(-50%) scale(${0.7 + 0.3 * anim})`,
+        opacity: anim,
+      }}
+    >
+      <div
+        style={{
+          color: ACCENT,
+          fontSize: 44,
+          fontWeight: 900,
+          letterSpacing: 1,
+          textShadow: "0 6px 24px rgba(0,0,0,0.8)",
+        }}
+      >
+        VS
+      </div>
+    </div>
+  );
+};
+
 /** Big countdown with a ring, shown over the revealed tiles. */
 const Timer: React.FC<{ timerSec: number }> = ({ timerSec }) => {
   const frame = useCurrentFrame();
@@ -317,7 +431,7 @@ const RoundView: React.FC<{
       ) : null}
 
       {/* Tile own sound during its reveal window */}
-      {round.tiles.map((tile, i) =>
+      {roundTiles(round).map((tile, i) =>
         tile.sound ? (
           <Sequence
             key={`snd-${i}`}
@@ -339,46 +453,110 @@ const RoundView: React.FC<{
         </Sequence>
       ) : null}
 
-      {/* Live reveal windows */}
-      {round.tiles.map((tile, i) => {
-        const from = rel(tile.revealAtSec);
-        const to = tile.hideAtSec != null ? rel(tile.hideAtSec) : finale;
-        if (to <= from) return null;
-        return (
-          <Sequence key={`live-${i}`} from={from} durationInFrames={to - from}>
-            <TileFrame
-              tile={tile}
-              pop
-              label={tile.showLabelDuringReveal ? tile.label : null}
-            >
-              <TileMedia tile={tile} mode={mode} />
-            </TileFrame>
-          </Sequence>
-        );
-      })}
+      {/* Live reveal windows: block by block in group mode, tile by tile otherwise */}
+      {round.mode === "groups"
+        ? round.groups.map((group, gi) => {
+            const from = rel(group.revealAtSec);
+            const to = group.hideAtSec != null ? rel(group.hideAtSec) : finale;
+            if (to <= from) return null;
+            return (
+              <Sequence key={`g-live-${gi}`} from={from} durationInFrames={to - from}>
+                <GroupPanel group={group} highlight={null} pop />
+                {group.tiles.map((tile, i) => {
+                  const cardFrom = Math.max(0, rel(tile.revealAtSec) - from);
+                  return (
+                    <Sequence
+                      key={`g-card-${i}`}
+                      from={cardFrom}
+                      durationInFrames={Math.max(1, to - from - cardFrom)}
+                    >
+                      <TileFrame
+                        tile={tile}
+                        pop
+                        label={tile.showLabelDuringReveal ? tile.label : null}
+                      >
+                        <TileMedia tile={tile} mode={mode} />
+                      </TileFrame>
+                    </Sequence>
+                  );
+                })}
+              </Sequence>
+            );
+          })
+        : round.tiles.map((tile, i) => {
+            const from = rel(tile.revealAtSec);
+            const to = tile.hideAtSec != null ? rel(tile.hideAtSec) : finale;
+            if (to <= from) return null;
+            return (
+              <Sequence key={`live-${i}`} from={from} durationInFrames={to - from}>
+                <TileFrame
+                  tile={tile}
+                  pop
+                  label={tile.showLabelDuringReveal ? tile.label : null}
+                >
+                  <TileMedia tile={tile} mode={mode} />
+                </TileFrame>
+              </Sequence>
+            );
+          })}
+
+      {/* VS between neighbouring panels, from the moment the right one appears */}
+      {round.mode === "groups"
+        ? round.groups.slice(1).map((group, i) => {
+            const from = rel(group.revealAtSec);
+            if (contentEnd <= from) return null;
+            return (
+              <Sequence key={`vs-${i}`} from={from} durationInFrames={contentEnd - from}>
+                <VsSign left={round.groups[i].panel} right={group.panel} />
+              </Sequence>
+            );
+          })
+        : null}
 
       {/* Finale: everything revealed statically + timer (+ answer highlight) */}
       <Sequence from={finale} durationInFrames={Math.max(1, contentEnd - finale)}>
         <AbsoluteFill>
-          {round.tiles.map((tile, i) => (
-            <TileFrame
-              key={`fin-${i}`}
-              tile={tile}
-              pop={false}
-              label={
-                inAnswerPhase && tile.isAnswer
-                  ? tile.label
-                  : tile.showLabelAtFinale
-                    ? tile.label
-                    : null
-              }
-              highlight={
-                inAnswerPhase ? (tile.isAnswer ? "answer" : "dim") : null
-              }
-            >
-              <TileStill tile={tile} mode={mode} />
-            </TileFrame>
-          ))}
+          {round.mode === "groups"
+            ? round.groups.map((group, gi) => {
+                const state = inAnswerPhase ? (group.isAnswer ? "answer" : "dim") : null;
+                return (
+                  <React.Fragment key={`fin-g-${gi}`}>
+                    <GroupPanel group={group} highlight={state} pop={false} />
+                    {group.tiles.map((tile, i) => (
+                      <TileFrame
+                        key={`fin-c-${i}`}
+                        tile={tile}
+                        pop={false}
+                        label={tile.showLabelAtFinale ? tile.label : null}
+                        // the panel carries the gold; cards only fade when the
+                        // block lost, so the winner keeps its normal frames
+                        highlight={state === "dim" ? "dim" : null}
+                      >
+                        <TileStill tile={tile} mode={mode} />
+                      </TileFrame>
+                    ))}
+                  </React.Fragment>
+                );
+              })
+            : round.tiles.map((tile, i) => (
+                <TileFrame
+                  key={`fin-${i}`}
+                  tile={tile}
+                  pop={false}
+                  label={
+                    inAnswerPhase && tile.isAnswer
+                      ? tile.label
+                      : tile.showLabelAtFinale
+                        ? tile.label
+                        : null
+                  }
+                  highlight={
+                    inAnswerPhase ? (tile.isAnswer ? "answer" : "dim") : null
+                  }
+                >
+                  <TileStill tile={tile} mode={mode} />
+                </TileFrame>
+              ))}
         </AbsoluteFill>
       </Sequence>
 
