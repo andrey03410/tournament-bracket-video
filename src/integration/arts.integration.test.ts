@@ -210,3 +210,83 @@ describe("render-item art assignment and crop", () => {
     ).rejects.toThrow("NOT_FOUND");
   });
 });
+
+// Phase 17: the pool used to count only top positions, so a poster standing as
+// a card in thirty picker rounds reported "not used" — and deleting it took the
+// cards along (PickerTile.artId cascades).
+describe("art usage breakdown", () => {
+  it("counts cards, playlist entries, backgrounds and top positions", async () => {
+    const poster = await createArt(userId, { fileName: "usage-poster.png", data: PNG });
+    const music = await prisma.art.create({
+      data: { userId, filePath: "fake/m.mp3", label: "usage-music", kind: "audio", sizeBytes: 10 },
+    });
+
+    const project = await prisma.videoProject.create({
+      data: {
+        userId,
+        title: "Usage IT",
+        kind: "picker",
+        bgArtId: poster.id,
+        bgMusicArtId: music.id,
+      },
+    });
+    const round = await prisma.pickerRound.create({
+      data: { projectId: project.id, order: 0, bgArtId: poster.id },
+    });
+    await prisma.pickerTile.createMany({
+      data: [
+        { roundId: round.id, artId: poster.id, order: 0 },
+        { roundId: round.id, artId: poster.id, order: 1 },
+      ],
+    });
+    await prisma.pickerPlaylistItem.create({
+      data: { projectId: project.id, order: 0, artId: music.id },
+    });
+    await patchRenderItem(userId, itemId, { artId: poster.id });
+
+    const listed = await listArts(userId, { q: "usage-" });
+    const posterRow = listed.arts.find((a) => a.id === poster.id);
+    const musicRow = listed.arts.find((a) => a.id === music.id);
+
+    // two cards + one position + project background + round background
+    expect(posterRow?.usage).toEqual({
+      positions: 1,
+      cards: 2,
+      playlist: 0,
+      backgrounds: 2,
+      total: 5,
+    });
+    expect(posterRow?.usageCount).toBe(5);
+    expect(musicRow?.usage).toEqual({
+      positions: 0,
+      cards: 0,
+      playlist: 1,
+      backgrounds: 1,
+      total: 2,
+    });
+
+    // deleting the poster is what the warning is about: the cards go with it
+    await deleteArt(userId, poster.id);
+    expect(await prisma.pickerTile.count({ where: { roundId: round.id } })).toBe(0);
+    const freed = await prisma.renderItem.findUnique({ where: { id: itemId } });
+    expect(freed?.artId).toBeNull();
+    const rounds = await prisma.pickerRound.findUnique({ where: { id: round.id } });
+    expect(rounds?.bgArtId).toBeNull();
+
+    await prisma.videoProject.delete({ where: { id: project.id } });
+    await prisma.art.delete({ where: { id: music.id } });
+  });
+
+  it("reports zeros for media nothing points at", async () => {
+    const lonely = await createArt(userId, { fileName: "usage-lonely.png", data: PNG });
+    const listed = await listArts(userId, { q: "usage-lonely" });
+    expect(listed.arts[0]?.usage).toEqual({
+      positions: 0,
+      cards: 0,
+      playlist: 0,
+      backgrounds: 0,
+      total: 0,
+    });
+    await deleteArt(userId, lonely.id);
+  });
+});

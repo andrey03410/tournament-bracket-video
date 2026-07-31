@@ -3,6 +3,11 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Cropper, { type Area } from "react-easy-crop";
 import type { ArtCrop } from "@/lib/domain/art-crop";
+import {
+  describeUsage,
+  describeDeletion,
+  type UsageBreakdown,
+} from "@/lib/domain/art-usage";
 import { ImportSources } from "@/app/components/ImportSources";
 
 export type GalleryKind = "image" | "video" | "audio";
@@ -15,6 +20,7 @@ export interface GalleryArt {
   posterUrl: string | null;
   durationSec: number | null;
   hasAudio: boolean;
+  usage: UsageBreakdown;
   usageCount: number;
 }
 
@@ -231,8 +237,15 @@ export function ArtGalleryModal({
   }
 
   async function remove(art: GalleryArt) {
-    const used = art.usageCount > 0 ? ` Используется в позициях: ${art.usageCount}.` : "";
-    if (!confirm(`Удалить «${art.label ?? "без названия"}»?${used} Действие необратимо.`)) return;
+    // Say what deletion actually does: cards and playlist entries go away with
+    // the media (cascade), top positions are only freed.
+    const consequences = describeDeletion(art.usage);
+    if (
+      !confirm(
+        `Удалить «${art.label ?? "без названия"}»?${consequences ? ` ${consequences}.` : ""} Действие необратимо.`,
+      )
+    )
+      return;
     await fetch(`/api/arts/${art.id}`, { method: "DELETE" });
     setArts((prev) => prev.filter((a) => a.id !== art.id));
     setRecent((prev) => prev.filter((a) => a.id !== art.id));
@@ -293,6 +306,9 @@ export function ArtGalleryModal({
                 onClick={(e) => e.stopPropagation()}
                 onBlur={(e) => void rename(a, e.target.value)}
               />
+              <span className="art-usage" title={describeUsage(a.usage)}>
+                {describeUsage(a.usage)}
+              </span>
             </div>
             <button
               className="del"

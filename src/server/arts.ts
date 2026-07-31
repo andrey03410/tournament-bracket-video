@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { saveFile, removePath, artPath, absPath } from "@/lib/storage";
 import { probeMediaInfo, extractPoster } from "@/lib/audio";
 import { AUDIO_EXT, VIDEO_EXT, IMG_EXT } from "@/lib/domain/media-ext";
+import { usageBreakdown, type UsageBreakdown } from "@/lib/domain/art-usage";
 import type { MediaKind } from "@/lib/domain/position-media";
 
 /** Pool media kinds: visuals (image/video) + phase-6 audio tracks. */
@@ -28,18 +29,37 @@ export interface ArtRow {
   hasAudio: boolean;
   posterPath: string | null;
   sizeBytes: number | null;
+  /** Everything that points at this media, grouped (phase 17). */
+  usage: UsageBreakdown;
+  /** Total of `usage` — kept as a field because the UI shows it on cards. */
   usageCount: number;
   lastUsedAt: Date | null;
   createdAt: Date;
 }
 
-const ART_INCLUDE = { _count: { select: { renderItems: true } } } as const;
+// Every relation that points at an Art: a poster standing as a card in a picker
+// round is just as "used" as one assigned to a top position.
+const ART_INCLUDE = {
+  _count: {
+    select: {
+      renderItems: true,
+      audioRenderItems: true,
+      pickerTiles: true,
+      playlistItems: true,
+      projectBgs: true,
+      projectMusics: true,
+      roundBgs: true,
+      roundMusics: true,
+    },
+  },
+} as const;
 
 type ArtWithCount = Awaited<
   ReturnType<typeof prisma.art.findMany<{ include: typeof ART_INCLUDE }>>
 >[number];
 
 function toRow(a: ArtWithCount): ArtRow {
+  const usage = usageBreakdown(a._count);
   return {
     id: a.id,
     label: a.label,
@@ -49,7 +69,8 @@ function toRow(a: ArtWithCount): ArtRow {
     hasAudio: a.hasAudio,
     posterPath: a.posterPath,
     sizeBytes: a.sizeBytes,
-    usageCount: a._count.renderItems,
+    usage,
+    usageCount: usage.total,
     lastUsedAt: a.lastUsedAt,
     createdAt: a.createdAt,
   };
