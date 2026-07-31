@@ -490,6 +490,18 @@ export async function moveTileToGroup(userId: string, tileId: string, groupId: s
   return updated;
 }
 
+/** Reorder the cards inside one block (ids must be exactly its cards). */
+export async function reorderGroupTiles(userId: string, groupId: string, ids: string[]) {
+  const group = await ownedGroup(userId, groupId);
+  const known = new Set(group.tiles.map((t) => t.id));
+  if (ids.length !== known.size || ids.some((id) => !known.has(id)))
+    throw new Error("INVALID_ORDER");
+  await prisma.$transaction(
+    ids.map((id, i) => prisma.pickerTile.update({ where: { id }, data: { order: i } })),
+  );
+  return touch(group.round.projectId);
+}
+
 /** Add a card from the pool to a block of a group round. */
 export async function addTileToGroup(userId: string, groupId: string, artId: string) {
   const group = await ownedGroup(userId, groupId);

@@ -507,6 +507,26 @@ audio {
   padding: 2px 8px;
   border-radius: 8px;
 }
+/* Group comparison (spec 16): blocks side by side, each with its own cards. */
+.group-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+  margin-top: 6px;
+}
+.group-col {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.group-col > .row > input {
+  margin-bottom: 0;
+}
+.group-col .tile-grid {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+
 .tile-add {
   border: 2px dashed var(--border);
   border-radius: 10px;

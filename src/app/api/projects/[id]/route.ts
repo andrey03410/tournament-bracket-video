@@ -32,6 +32,24 @@ function artDto(a: LoadedProject["bgArt"]) {
   };
 }
 
+function tileDto(t: LoadedProject["rounds"][number]["tiles"][number]) {
+  return {
+    id: t.id,
+    order: t.order,
+    artId: t.artId,
+    art: artDto(t.art),
+    label: t.label,
+    isAnswer: t.isAnswer,
+    playSound: t.playSound,
+    startSec: t.startSec,
+    crop:
+      t.cropX != null && t.cropY != null && t.cropW != null && t.cropH != null
+        ? { x: t.cropX, y: t.cropY, w: t.cropW, h: t.cropH }
+        : null,
+    fitMode: t.fitMode,
+  };
+}
+
 function serialize(p: LoadedProject) {
   return {
     id: p.id,
@@ -62,20 +80,15 @@ function serialize(p: LoadedProject) {
       bgArt: artDto(r.bgArt),
       bgMusicArt: artDto(r.bgMusicArt),
       tileOrientation: r.tileOrientation,
-      tiles: r.tiles.map((t) => ({
-        id: t.id,
-        order: t.order,
-        artId: t.artId,
-        art: artDto(t.art),
-        label: t.label,
-        isAnswer: t.isAnswer,
-        playSound: t.playSound,
-        startSec: t.startSec,
-        crop:
-          t.cropX != null && t.cropY != null && t.cropW != null && t.cropH != null
-            ? { x: t.cropX, y: t.cropY, w: t.cropW, h: t.cropH }
-            : null,
-        fitMode: t.fitMode,
+      mode: r.mode,
+      // Plain tiles of a single round; a group round keeps its cards in blocks.
+      tiles: r.tiles.filter((t) => !t.groupId).map(tileDto),
+      groups: r.groups.map((g) => ({
+        id: g.id,
+        order: g.order,
+        label: g.label,
+        isAnswer: g.isAnswer,
+        tiles: g.tiles.map(tileDto),
       })),
     })),
     invalidRounds: invalidRounds(p),

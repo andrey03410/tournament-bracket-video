@@ -37,6 +37,13 @@ interface TileDto {
   crop: ArtCrop | null;
   fitMode: FitMode;
 }
+interface GroupDto {
+  id: string;
+  order: number;
+  label: string | null;
+  isAnswer: boolean;
+  tiles: TileDto[];
+}
 interface RoundDto {
   id: string;
   order: number;
@@ -50,6 +57,9 @@ interface RoundDto {
   bgMusicArt: ArtDto | null;
   tiles: TileDto[];
   tileOrientation: TileOrientation | null;
+  /** "single" = обычные блоки, "groups" = сравнение блок к блоку. */
+  mode: "single" | "groups";
+  groups: GroupDto[];
 }
 interface ProjectDto {
   id: string;
@@ -90,9 +100,16 @@ type ModalState =
   | { kind: "manage" }
   | { kind: "bg"; roundId: string | null } // null = project default
   | { kind: "music"; roundId: string | null } // roundId=null -> append to the playlist
-  | { kind: "tile"; roundId: string }
+  | { kind: "tile"; roundId: string; groupId?: string }
   | { kind: "crop"; roundId: string; tileId: string; url: string; mediaKind: "image" | "video"; crop: ArtCrop | null }
   | null;
+
+/** Positional block names shown as placeholders (must match the frame). */
+const BLOCK_LETTERS = ["А", "Б", "В"];
+
+/** Total number of cards in the blocks of a group round. */
+const groupCards = (round: RoundDto) =>
+  round.groups.reduce((sum, g) => sum + g.tiles.length, 0);
 
 function fmtDur(sec: number): string {
   const s = Math.round(sec);
@@ -210,6 +227,23 @@ export function PickerConstructor({
     await call(`/api/projects/${projectId}/rounds`, "POST", { order: ids });
   }
 
+  const patchGroup = (groupId: string, body: Record<string, unknown>) =>
+    call(`/api/groups/${groupId}`, "PATCH", body);
+
+  /** Move a card into another block of the same round. */
+  const moveCardToGroup = (tileId: string, groupId: string) =>
+    call(`/api/tiles/${tileId}/group`, "POST", { groupId });
+
+  /** Reorder cards inside one block (reveal cascade follows this order). */
+  async function moveCardInGroup(group: GroupDto, tileId: string, dir: -1 | 1) {
+    const ids = group.tiles.map((t) => t.id);
+    const i = ids.indexOf(tileId);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    await call(`/api/groups/${group.id}/tiles`, "POST", { order: ids });
+  }
+
   async function moveTile(round: RoundDto, tileId: string, dir: -1 | 1) {
     const ids = round.tiles.map((t) => t.id);
     const i = ids.indexOf(tileId);
@@ -244,6 +278,126 @@ export function PickerConstructor({
     pollJob(data.jobId);
   }
 
+  /** One card of a round (or of a block): thumb, label, fit, crop, sound. */
+  function renderTile(round: RoundDto, tile: TileDto, extra: React.ReactNode) {
+    if (!project) return null;
+    return (
+      <div className="tile-card" key={tile.id}>
+        <div className={`tile-thumb${roundOrientation(round, project) === "portrait" ? " tile-portrait" : ""}`}>
+          {tile.art ? (
+            tile.art.kind === "video" ? (
+              tile.art.posterUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={tile.art.posterUrl} alt="" style={artCropStyle(tile.crop, tile.fitMode)} />
+              ) : (
+                <video src={tile.art.url} muted preload="metadata" style={artCropStyle(tile.crop, tile.fitMode)} />
+              )
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={tile.art.url} alt="" style={artCropStyle(tile.crop, tile.fitMode)} />
+            )
+          ) : null}
+          {tile.isAnswer && round.mode === "single" ? (
+            <span className="tile-answer">✔ ответ</span>
+          ) : null}
+        </div>
+        <input
+          placeholder="Подпись…"
+          defaultValue={tile.label ?? ""}
+          onBlur={(e) => void patchTile(tile.id, { label: e.target.value || null })}
+        />
+        <select
+          value={tile.fitMode}
+          onChange={(e) => void patchTile(tile.id, { fitMode: e.target.value })}
+        >
+          <option value="cover">Обрезка</option>
+          <option value="fill">Растянуть</option>
+          <option value="contain">Вписать</option>
+        </select>
+        <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+          {extra}
+          {tile.fitMode === "cover" ? (
+            <button
+              className="btn ghost"
+              title="Обрезка"
+              onClick={() =>
+                tile.art &&
+                setModal({
+                  kind: "crop",
+                  roundId: round.id,
+                  tileId: tile.id,
+                  url: tile.art.url,
+                  mediaKind: tile.art.kind === "video" ? "video" : "image",
+                  crop: tile.crop,
+                })
+              }
+            >
+              ✂
+            </button>
+          ) : null}
+          <button
+            className="btn ghost"
+            title="Убрать блок"
+            onClick={() => void call(`/api/tiles/${tile.id}`, "DELETE")}
+          >
+            ✕
+          </button>
+        </div>
+        {tile.art?.kind === "video" ? (
+          <>
+            <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              {tile.art.hasAudio ? (
+                <label className="row" style={{ gap: 5, fontSize: 13 }}>
+                  <input
+                    type="checkbox"
+                    checked={tile.playSound}
+                    onChange={(e) => void patchTile(tile.id, { playSound: e.target.checked })}
+                  />
+                  <span>звук</span>
+                </label>
+              ) : (
+                <span className="muted" style={{ fontSize: 12 }}>без звука</span>
+              )}
+              <input
+                type="number"
+                min={0}
+                step={0.5}
+                title="Старт видеоряда (сек)"
+                placeholder="старт, с"
+                style={{ width: 90, marginBottom: 0 }}
+                key={`ss-${tile.id}-${tile.startSec}`}
+                defaultValue={tile.startSec ?? ""}
+                onBlur={(e) =>
+                  void patchTile(tile.id, {
+                    startSec: e.target.value === "" ? null : Number(e.target.value),
+                  })
+                }
+              />
+              <button
+                className="btn ghost"
+                title="Подобрать старт по видео"
+                onClick={() =>
+                  setPreviewTileId(previewTileId === tile.id ? null : tile.id)
+                }
+              >
+                🎧
+              </button>
+            </div>
+            {previewTileId === tile.id ? (
+              <FragmentPreview
+                src={tile.art.url}
+                kind="video"
+                fragmentStartSec={tile.startSec ?? 0}
+                fragmentLenSec={round.revealSec ?? project.revealSec}
+                onSetStart={(sec) => void patchTile(tile.id, { startSec: sec })}
+              />
+            ) : null}
+          </>
+        ) : null}
+      </div>
+    );
+  }
+
   async function onModalPick(res: PickResult) {
     if (!modal) return;
     const m = modal;
@@ -255,13 +409,19 @@ export function PickerConstructor({
       if (m.roundId) await patchRound(m.roundId, { bgMusicArtId: res.artId });
       else await savePlaylist([...(project?.playlist ?? []).map((a) => a.id), res.artId]);
     } else if (m.kind === "tile") {
-      const ok = await call(`/api/rounds/${m.roundId}/tiles`, "POST", { artId: res.artId });
+      const url = m.groupId
+        ? `/api/groups/${m.groupId}/tiles`
+        : `/api/rounds/${m.roundId}/tiles`;
+      const ok = await call(url, "POST", { artId: res.artId });
       if (ok && res.crop) {
-        // the crop chosen during picking belongs to the just-added tile
+        // the crop chosen during picking belongs to the just-added card
         const fresh = await fetch(`/api/projects/${projectId}`, { cache: "no-store" });
         const d = await fresh.json();
         const round = (d.project as ProjectDto).rounds.find((r) => r.id === m.roundId);
-        const tile = round?.tiles[round.tiles.length - 1];
+        const cards = m.groupId
+          ? (round?.groups.find((g) => g.id === m.groupId)?.tiles ?? [])
+          : (round?.tiles ?? []);
+        const tile = cards[cards.length - 1];
         if (tile) await patchTile(tile.id, { crop: res.crop });
       }
     } else if (m.kind === "crop") {
@@ -501,7 +661,13 @@ export function PickerConstructor({
           <div className="row" style={{ justifyContent: "space-between" }}>
             <h2 style={{ margin: 0 }}>
               Раунд {ri + 1}
-              {round.tiles.length < 2 ? (
+              {round.mode === "groups" ? (
+                round.groups.length < 2 || round.groups.some((g) => g.tiles.length === 0) ? (
+                  <span className="muted" style={{ fontSize: 14 }}>
+                    {" "}· нужно минимум 2 блока, и в каждом хотя бы одна карточка
+                  </span>
+                ) : null
+              ) : round.tiles.length < 2 ? (
                 <span className="muted" style={{ fontSize: 14 }}> · добавьте минимум 2 блока</span>
               ) : null}
             </h2>
@@ -636,138 +802,123 @@ export function PickerConstructor({
             </div>
           </div>
 
-          <label style={{ marginTop: 12 }}>Блоки ({round.tiles.length}/9)</label>
-          <div className="tile-grid">
-            {round.tiles.map((tile) => (
-              <div className="tile-card" key={tile.id}>
-                <div className={`tile-thumb${roundOrientation(round, project) === "portrait" ? " tile-portrait" : ""}`}>
-                  {tile.art ? (
-                    tile.art.kind === "video" ? (
-                      tile.art.posterUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={tile.art.posterUrl} alt="" style={artCropStyle(tile.crop, tile.fitMode)} />
-                      ) : (
-                        <video src={tile.art.url} muted preload="metadata" style={artCropStyle(tile.crop, tile.fitMode)} />
-                      )
-                    ) : (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={tile.art.url} alt="" style={artCropStyle(tile.crop, tile.fitMode)} />
-                    )
-                  ) : null}
-                  {tile.isAnswer ? <span className="tile-answer">✔ ответ</span> : null}
+          <label style={{ marginTop: 12 }}>Режим раунда</label>
+          <select
+            value={round.mode}
+            onChange={(e) => void patchRound(round.id, { mode: e.target.value })}
+          >
+            <option value="single">Обычный — 2–9 блоков, выбираем один</option>
+            <option value="groups">Групповое сравнение — блок к блоку</option>
+          </select>
+
+          {round.mode === "groups" ? (
+            <>
+              <label style={{ marginTop: 12 }}>
+                Блоки ({round.groups.length}/3) · карточек {groupCards(round)}/15
+              </label>
+              {roundOrientation(round, project) === "portrait" && groupCards(round) > 8 ? (
+                <div className="muted" style={{ fontSize: 13, marginBottom: 4 }}>
+                  Карточек много для вертикальной ориентации — в кадре они получатся мелкими.
                 </div>
-                <input
-                  placeholder="Подпись…"
-                  defaultValue={tile.label ?? ""}
-                  onBlur={(e) => void patchTile(tile.id, { label: e.target.value || null })}
-                />
-                <select
-                  value={tile.fitMode}
-                  onChange={(e) => void patchTile(tile.id, { fitMode: e.target.value })}
-                >
-                  <option value="cover">Обрезка</option>
-                  <option value="fill">Растянуть</option>
-                  <option value="contain">Вписать</option>
-                </select>
-                <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-                  <button className="btn ghost" title="Левее" onClick={() => void moveTile(round, tile.id, -1)}>←</button>
-                  <button className="btn ghost" title="Правее" onClick={() => void moveTile(round, tile.id, 1)}>→</button>
-                  {tile.fitMode === "cover" ? (
-                    <button
-                      className="btn ghost"
-                      title="Обрезка"
-                      onClick={() =>
-                        tile.art &&
-                        setModal({
-                          kind: "crop",
-                          roundId: round.id,
-                          tileId: tile.id,
-                          url: tile.art.url,
-                          mediaKind: tile.art.kind === "video" ? "video" : "image",
-                          crop: tile.crop,
-                        })
-                      }
-                    >
-                      ✂
-                    </button>
-                  ) : null}
-                  <button
-                    className={`btn ghost${tile.isAnswer ? " active" : ""}`}
-                    title="Пометить правильным ответом"
-                    onClick={() => void patchTile(tile.id, { isAnswer: !tile.isAnswer })}
-                  >
-                    ✔
-                  </button>
-                  <button
-                    className="btn ghost"
-                    title="Убрать блок"
-                    onClick={() => void call(`/api/tiles/${tile.id}`, "DELETE")}
-                  >
-                    ✕
-                  </button>
-                </div>
-                {tile.art?.kind === "video" ? (
-                  <>
-                    <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                      {tile.art.hasAudio ? (
-                        <label className="row" style={{ gap: 5, fontSize: 13 }}>
-                          <input
-                            type="checkbox"
-                            checked={tile.playSound}
-                            onChange={(e) => void patchTile(tile.id, { playSound: e.target.checked })}
-                          />
-                          <span>звук</span>
-                        </label>
-                      ) : (
-                        <span className="muted" style={{ fontSize: 12 }}>без звука</span>
-                      )}
+              ) : null}
+              <div className="group-grid">
+                {round.groups.map((group, gi) => (
+                  <div className="group-col" key={group.id}>
+                    <div className="row" style={{ gap: 6, alignItems: "center" }}>
                       <input
-                        type="number"
-                        min={0}
-                        step={0.5}
-                        title="Старт видеоряда (сек)"
-                        placeholder="старт, с"
-                        style={{ width: 90, marginBottom: 0 }}
-                        key={`ss-${tile.id}-${tile.startSec}`}
-                        defaultValue={tile.startSec ?? ""}
-                        onBlur={(e) =>
-                          void patchTile(tile.id, {
-                            startSec: e.target.value === "" ? null : Number(e.target.value),
-                          })
-                        }
+                        placeholder={`Блок ${BLOCK_LETTERS[gi] ?? gi + 1}`}
+                        defaultValue={group.label ?? ""}
+                        onBlur={(e) => void patchGroup(group.id, { label: e.target.value || null })}
                       />
                       <button
-                        className="btn ghost"
-                        title="Подобрать старт по видео"
-                        onClick={() =>
-                          setPreviewTileId(previewTileId === tile.id ? null : tile.id)
-                        }
+                        className={`btn ghost${group.isAnswer ? " active" : ""}`}
+                        title="Блок-победитель (необязательно)"
+                        onClick={() => void patchGroup(group.id, { isAnswer: !group.isAnswer })}
                       >
-                        🎧
+                        ✔
+                      </button>
+                      <button
+                        className="btn ghost"
+                        title="Удалить блок с карточками"
+                        onClick={() => {
+                          if (confirm("Удалить блок вместе с его карточками?"))
+                            void call(`/api/groups/${group.id}`, "DELETE");
+                        }}
+                      >
+                        ✕
                       </button>
                     </div>
-                    {previewTileId === tile.id ? (
-                      <FragmentPreview
-                        src={tile.art.url}
-                        kind="video"
-                        fragmentStartSec={tile.startSec ?? 0}
-                        fragmentLenSec={round.revealSec ?? project.revealSec}
-                        onSetStart={(sec) => void patchTile(tile.id, { startSec: sec })}
-                      />
-                    ) : null}
-                  </>
+                    <div className="tile-grid">
+                      {group.tiles.map((tile) =>
+                        renderTile(
+                          round,
+                          tile,
+                          <>
+                            <button className="btn ghost" title="Раньше в блоке" onClick={() => void moveCardInGroup(group, tile.id, -1)}>←</button>
+                            <button className="btn ghost" title="Позже в блоке" onClick={() => void moveCardInGroup(group, tile.id, 1)}>→</button>
+                            {gi > 0 ? (
+                              <button className="btn ghost" title="В предыдущий блок" onClick={() => void moveCardToGroup(tile.id, round.groups[gi - 1].id)}>⇦</button>
+                            ) : null}
+                            {gi < round.groups.length - 1 ? (
+                              <button className="btn ghost" title="В следующий блок" onClick={() => void moveCardToGroup(tile.id, round.groups[gi + 1].id)}>⇨</button>
+                            ) : null}
+                          </>,
+                        ),
+                      )}
+                      {group.tiles.length < 5 ? (
+                        <button
+                          className="tile-add"
+                          onClick={() => setModal({ kind: "tile", roundId: round.id, groupId: group.id })}
+                        >
+                          ➕<br />карточка
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {round.groups.length < 3 ? (
+                <button
+                  className="btn secondary"
+                  style={{ marginTop: 10 }}
+                  onClick={() => void call(`/api/rounds/${round.id}/groups`, "POST", {})}
+                >
+                  ➕ Добавить блок
+                </button>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <label style={{ marginTop: 12 }}>Блоки ({round.tiles.length}/9)</label>
+              <div className="tile-grid">
+                {round.tiles.map((tile) =>
+                  renderTile(
+                    round,
+                    tile,
+                    <>
+                      <button className="btn ghost" title="Левее" onClick={() => void moveTile(round, tile.id, -1)}>←</button>
+                      <button className="btn ghost" title="Правее" onClick={() => void moveTile(round, tile.id, 1)}>→</button>
+                      <button
+                        className={`btn ghost${tile.isAnswer ? " active" : ""}`}
+                        title="Пометить правильным ответом"
+                        onClick={() => void patchTile(tile.id, { isAnswer: !tile.isAnswer })}
+                      >
+                        ✔
+                      </button>
+                    </>,
+                  ),
+                )}
+                {round.tiles.length < 9 ? (
+                  <button
+                    className="tile-add"
+                    onClick={() => setModal({ kind: "tile", roundId: round.id })}
+                  >
+                    ➕<br />блок
+                  </button>
                 ) : null}
               </div>
-            ))}
-            {round.tiles.length < 9 ? (
-              <button
-                className="tile-add"
-                onClick={() => setModal({ kind: "tile", roundId: round.id })}
-              >
-                ➕<br />блок
-              </button>
-            ) : null}
-          </div>
+            </>
+          )}
         </div>
       ))}
 
