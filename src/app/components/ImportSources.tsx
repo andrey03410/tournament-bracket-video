@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { classifyMediaUrl } from "@/lib/domain/media-url";
+import { pickPastedImageUrl, pasteLabel, isGenericPasteName } from "@/lib/domain/clipboard";
 
 // Every way media gets into the pool, behind one row of tabs: local files
 // (click/drag&drop), a link (picture — imported here and now; video/audio — the
@@ -428,11 +429,20 @@ function ShikimoriSource({ onImported }: { onImported: () => void }) {
   );
 }
 
+/** True while the caret sits in a field, where Ctrl+V means "paste text". */
+function typingSomewhere(target: EventTarget | null): boolean {
+  const el = (target as HTMLElement | null) ?? document.activeElement;
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || (el as HTMLElement).isContentEditable === true;
+}
+
 export function ImportSources({ onImported }: { onImported: () => void }) {
   const [source, setSource] = useState<Source>("files");
   const [drag, setDrag] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pasted, setPasted] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const upload = useCallback(
@@ -448,12 +458,67 @@ export function ImportSources({ onImported }: { onImported: () => void }) {
         const { ok, errors } = await uploadPoolFiles(media, labels);
         if (ok) onImported();
         setError(errors.length ? `Не загружено: ${errors.slice(0, 3).join("; ")}` : null);
+        return ok;
       } finally {
         setBusy(false);
       }
     },
     [onImported],
   );
+
+  /**
+   * Ctrl+V anywhere in the media modal. A screenshot arrives as a file with a
+   * placeholder name (`image.png`) and gets a "Вставка ДД.ММ ЧЧ:ММ" label; a
+   * picture copied in a browser arrives as HTML/text and goes through the
+   * by-link import. Pastes into a text field are left alone.
+   */
+  useEffect(() => {
+    async function onPaste(event: ClipboardEvent) {
+      if (typingSomewhere(event.target)) return;
+      const data = event.clipboardData;
+      if (!data) return;
+
+      const files = Array.from(data.files ?? []).filter(isMediaFile);
+      if (files.length) {
+        event.preventDefault();
+        const labels = new Map<File, string>();
+        const stamp = pasteLabel(new Date());
+        for (const f of files) if (isGenericPasteName(f.name)) labels.set(f, stamp);
+        setPasted(null);
+        const ok = await upload(files, labels);
+        if (ok) setPasted(files.length === 1 ? `Вставлено: ${labels.get(files[0]) ?? files[0].name}` : `Вставлено файлов: ${ok}`);
+        return;
+      }
+
+      const url = pickPastedImageUrl({
+        text: data.getData("text/plain"),
+        html: data.getData("text/html"),
+      });
+      if (!url) return;
+      event.preventDefault();
+      setBusy(true);
+      setError(null);
+      setPasted(null);
+      try {
+        const res = await fetch("/api/arts/from-url", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error ?? "Не удалось импортировать вставленную ссылку");
+        setPasted(`Вставлено: ${body.label ?? "без названия"}`);
+        onImported();
+      } catch (e) {
+        setError((e as Error).message);
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, [upload, onImported]);
 
   return (
     <div
@@ -482,6 +547,12 @@ export function ImportSources({ onImported }: { onImported: () => void }) {
         ))}
       </div>
 
+      {pasted ? (
+        <div className="paste-note" style={{ fontSize: 13, color: "#7be29a", marginBottom: 8 }}>
+          {pasted}
+        </div>
+      ) : null}
+
       {source === "files" ? (
         <>
           <div
@@ -490,7 +561,7 @@ export function ImportSources({ onImported }: { onImported: () => void }) {
           >
             {busy
               ? "Загрузка…"
-              : "Перетащите картинки, видео или аудио сюда или нажмите, чтобы выбрать"}
+              : "Перетащите картинки, видео или аудио сюда, нажмите, чтобы выбрать, или вставьте из буфера (Ctrl+V)"}
             <input
               ref={fileInputRef}
               type="file"
