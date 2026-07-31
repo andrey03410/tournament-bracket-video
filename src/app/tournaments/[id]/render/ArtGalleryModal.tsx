@@ -9,6 +9,7 @@ import {
   type UsageBreakdown,
 } from "@/lib/domain/art-usage";
 import { ImportSources } from "@/app/components/ImportSources";
+import { RenameField } from "@/app/components/RenameField";
 
 export type GalleryKind = "image" | "video" | "audio";
 
@@ -225,15 +226,20 @@ export function ArtGalleryModal({
     return () => io.disconnect();
   }, [loadMore, cropArt]);
 
-  async function rename(art: GalleryArt, label: string) {
-    const next = label.trim() || null;
-    if (next === art.label) return;
-    await fetch(`/api/arts/${art.id}`, {
+  async function rename(art: GalleryArt, next: string | null) {
+    const res = await fetch(`/api/arts/${art.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ label: next }),
     });
-    setArts((prev) => prev.map((a) => (a.id === art.id ? { ...a, label: next } : a)));
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error ?? "Не удалось переименовать");
+    }
+    const patch = (list: GalleryArt[]) =>
+      list.map((a) => (a.id === art.id ? { ...a, label: next } : a));
+    setArts(patch);
+    setRecent(patch);
   }
 
   async function remove(art: GalleryArt) {
@@ -300,12 +306,7 @@ export function ArtGalleryModal({
         {mode === "manage" ? (
           <>
             <div className="meta">
-              <input
-                defaultValue={a.label ?? ""}
-                placeholder="Название…"
-                onClick={(e) => e.stopPropagation()}
-                onBlur={(e) => void rename(a, e.target.value)}
-              />
+              <RenameField value={a.label} onSave={(next) => rename(a, next)} />
               <span className="art-usage" title={describeUsage(a.usage)}>
                 {describeUsage(a.usage)}
               </span>
