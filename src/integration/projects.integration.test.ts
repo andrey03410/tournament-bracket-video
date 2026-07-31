@@ -17,6 +17,12 @@ import {
   patchRound,
   deleteRound,
   addTile,
+  addTileToGroup,
+  setRoundMode,
+  addGroup,
+  patchGroup,
+  deleteGroup,
+  moveTileToGroup,
   patchTile,
   deleteTile,
   reorderTiles,
@@ -520,5 +526,166 @@ describe("project deletion", () => {
     await deleteProject(userId, p.id);
     expect(existsSync(absPath(outRel))).toBe(false);
     expect(await prisma.renderJob.findUnique({ where: { id: job.id } })).toBeNull();
+  });
+});
+
+// ---- Phase 16: group comparison (block against block) ----
+
+describe("phase 16: group rounds", () => {
+  async function pickerWithTiles(title: string, tiles: number) {
+    const p = await createProject(userId, title, "picker");
+    const loaded = await getProject(userId, p.id);
+    const round = loaded!.rounds[0];
+    for (let i = 0; i < tiles; i++) await addTile(userId, round.id, imageArtId);
+    return { projectId: p.id, roundId: round.id };
+  }
+
+  it("switching to groups moves the tiles into block 1 and adds an empty block 2", async () => {
+    const { projectId, roundId } = await pickerWithTiles("Групповой раунд", 3);
+    await setRoundMode(userId, roundId, "groups");
+
+    const loaded = await getProject(userId, projectId);
+    const round = loaded!.rounds[0];
+    expect(round.mode).toBe("groups");
+    expect(round.groups).toHaveLength(2);
+    expect(round.groups[0].tiles.map((t) => t.order)).toEqual([0, 1, 2]);
+    expect(round.groups[1].tiles).toEqual([]);
+    for (const tile of round.groups[0].tiles) expect(tile.groupId).toBe(round.groups[0].id);
+    await deleteProject(userId, projectId);
+  });
+
+  it("chunks more than five tiles into blocks of five instead of overflowing block 1", async () => {
+    const { projectId, roundId } = await pickerWithTiles("Семь плиток", 7);
+    await setRoundMode(userId, roundId, "groups");
+    const round = (await getProject(userId, projectId))!.rounds[0];
+    expect(round.groups.map((g) => g.tiles.length)).toEqual([5, 2]);
+    await deleteProject(userId, projectId);
+  });
+
+  it("switching back to single keeps the cards as plain tiles in block order", async () => {
+    const { projectId, roundId } = await pickerWithTiles("Туда и обратно", 3);
+    await setRoundMode(userId, roundId, "groups");
+    const groups = (await getProject(userId, projectId))!.rounds[0].groups;
+    await moveTileToGroup(userId, groups[0].tiles[0].id, groups[1].id);
+
+    await setRoundMode(userId, roundId, "single");
+    const round = (await getProject(userId, projectId))!.rounds[0];
+    expect(round.mode).toBe("single");
+    expect(round.groups).toEqual([]);
+    expect(round.tiles).toHaveLength(3);
+    expect(round.tiles.map((t) => t.order)).toEqual([0, 1, 2]);
+    for (const tile of round.tiles) expect(tile.groupId).toBeNull();
+    await deleteProject(userId, projectId);
+  });
+
+  it("holds the limits: 3 blocks, 5 cards per block", async () => {
+    const { projectId, roundId } = await pickerWithTiles("Лимиты", 0);
+    await setRoundMode(userId, roundId, "groups");
+    let round = (await getProject(userId, projectId))!.rounds[0];
+    await addGroup(userId, roundId);
+    await expect(addGroup(userId, roundId)).rejects.toThrow("TOO_MANY_GROUPS");
+
+    const groupId = round.groups[0].id;
+    for (let i = 0; i < 5; i++) await addTileToGroup(userId, groupId, imageArtId);
+    await expect(addTileToGroup(userId, groupId, imageArtId)).rejects.toThrow("TOO_MANY_TILES");
+
+    round = (await getProject(userId, projectId))!.rounds[0];
+    expect(round.groups.map((g) => g.tiles.length)).toEqual([5, 0, 0]);
+    await deleteProject(userId, projectId);
+  });
+
+  it("keeps the answer unique per round and trims the block name", async () => {
+    const { projectId, roundId } = await pickerWithTiles("Ответ", 0);
+    await setRoundMode(userId, roundId, "groups");
+    const groups = (await getProject(userId, projectId))!.rounds[0].groups;
+
+    await patchGroup(userId, groups[0].id, { label: "  Тройка Clannad  ", isAnswer: true });
+    await patchGroup(userId, groups[1].id, { isAnswer: true });
+    const after = (await getProject(userId, projectId))!.rounds[0].groups;
+    expect(after[0].label).toBe("Тройка Clannad");
+    expect(after.map((g) => g.isAnswer)).toEqual([false, true]);
+
+    // blank label falls back to null (the frame then shows «Блок А/Б/В»)
+    await patchGroup(userId, groups[0].id, { label: "   " });
+    expect((await getProject(userId, projectId))!.rounds[0].groups[0].label).toBeNull();
+    await deleteProject(userId, projectId);
+  });
+
+  it("moves a card between blocks, refuses a full block and a foreign round", async () => {
+    const { projectId, roundId } = await pickerWithTiles("Перенос", 2);
+    await setRoundMode(userId, roundId, "groups");
+    const round = (await getProject(userId, projectId))!.rounds[0];
+    const [a, b] = round.groups;
+
+    await moveTileToGroup(userId, a.tiles[1].id, b.id);
+    let groups = (await getProject(userId, projectId))!.rounds[0].groups;
+    expect(groups.map((g) => g.tiles.length)).toEqual([1, 1]);
+    expect(groups[1].tiles[0].order).toBe(0);
+
+    // fill B up to five, then the move must be refused
+    for (let i = 0; i < 4; i++) await addTileToGroup(userId, b.id, imageArtId);
+    await expect(moveTileToGroup(userId, groups[0].tiles[0].id, b.id)).rejects.toThrow(
+      "TOO_MANY_TILES",
+    );
+
+    // a block of another round is not a valid target
+    const other = await addRound(userId, projectId);
+    await setRoundMode(userId, other.id, "groups");
+    const otherGroup = (await getProject(userId, projectId))!.rounds[1].groups[0];
+    groups = (await getProject(userId, projectId))!.rounds[0].groups;
+    await expect(moveTileToGroup(userId, groups[0].tiles[0].id, otherGroup.id)).rejects.toThrow(
+      "BAD_GROUP",
+    );
+    await deleteProject(userId, projectId);
+  });
+
+  it("deleting a block removes its cards and renumbers the rest", async () => {
+    const { projectId, roundId } = await pickerWithTiles("Удаление блока", 4);
+    await setRoundMode(userId, roundId, "groups");
+    await addGroup(userId, roundId);
+    let round = (await getProject(userId, projectId))!.rounds[0];
+    const doomed = round.groups[0].id;
+    const tileIds = round.groups[0].tiles.map((t) => t.id);
+
+    await deleteGroup(userId, doomed);
+    round = (await getProject(userId, projectId))!.rounds[0];
+    expect(round.groups).toHaveLength(2);
+    expect(round.groups.map((g) => g.order)).toEqual([0, 1]);
+    expect(round.tiles).toHaveLength(0);
+    for (const id of tileIds)
+      expect(await prisma.pickerTile.findUnique({ where: { id } })).toBeNull();
+    await deleteProject(userId, projectId);
+  });
+
+  it("addTile and addTileToGroup each refuse the wrong round mode", async () => {
+    const { projectId, roundId } = await pickerWithTiles("Режимы", 0);
+    const single = await addRound(userId, projectId);
+    await expect(addTileToGroup(userId, "nope", imageArtId)).rejects.toThrow("NOT_FOUND");
+
+    await setRoundMode(userId, roundId, "groups");
+    await expect(addTile(userId, roundId, imageArtId)).rejects.toThrow("NOT_SINGLE");
+
+    const groups = (await getProject(userId, projectId))!.rounds[0].groups;
+    await expect(setRoundMode(userId, single.id, "nope")).rejects.toThrow("BAD_MODE");
+    expect((await addTileToGroup(userId, groups[0].id, imageArtId)).groupId).toBe(groups[0].id);
+    await deleteProject(userId, projectId);
+  });
+
+  it("invalidRounds: a group round needs two non-empty blocks", async () => {
+    const { projectId, roundId } = await pickerWithTiles("Валидация", 3);
+    await setRoundMode(userId, roundId, "groups"); // 3 cards in block 1, block 2 empty
+    let loaded = await getProject(userId, projectId);
+    expect(invalidRounds(loaded!)).toEqual([1]);
+
+    const groups = loaded!.rounds[0].groups;
+    await moveTileToGroup(userId, groups[0].tiles[2].id, groups[1].id); // 2 vs 1
+    loaded = await getProject(userId, projectId);
+    expect(invalidRounds(loaded!)).toEqual([]);
+
+    // one block left -> not renderable again
+    await deleteGroup(userId, groups[1].id);
+    loaded = await getProject(userId, projectId);
+    expect(invalidRounds(loaded!)).toEqual([1]);
+    await deleteProject(userId, projectId);
   });
 });

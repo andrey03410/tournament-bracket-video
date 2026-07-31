@@ -3,7 +3,14 @@ import path from "node:path";
 import { prisma } from "@/lib/db";
 import { removePath } from "@/lib/storage";
 import { parseArtCrop } from "@/lib/domain/art-crop";
-import { MAX_TILES, effectiveOrientation, type TileOrientation } from "@/lib/domain/picker-layout";
+import {
+  MAX_TILES,
+  MIN_GROUPS,
+  MAX_GROUPS,
+  MAX_GROUP_TILES,
+  effectiveOrientation,
+  type TileOrientation,
+} from "@/lib/domain/picker-layout";
 
 // Video projects (phase 6): a standalone "top" (manual positions) or a
 // "picker" (rounds of 2-9 tiles). Framework-free service layer, thin routes
@@ -79,6 +86,12 @@ const PROJECT_INCLUDE = {
       bgArt: true,
       bgMusicArt: true,
       tiles: { orderBy: { order: "asc" as const }, include: { art: true } },
+      groups: {
+        orderBy: { order: "asc" as const },
+        include: {
+          tiles: { orderBy: { order: "asc" as const }, include: { art: true } },
+        },
+      },
     },
   },
 } as const;
@@ -342,10 +355,166 @@ export async function reorderRounds(userId: string, projectId: string, ids: stri
   return touch(projectId);
 }
 
+// ---- Picker blocks (group comparison, spec 16) ----
+
+export const ROUND_MODES = ["single", "groups"] as const;
+export type RoundMode = (typeof ROUND_MODES)[number];
+
+async function ownedGroup(userId: string, groupId: string) {
+  const group = await prisma.pickerGroup.findFirst({
+    where: { id: groupId, round: { project: { userId } } },
+    include: { tiles: true, round: true },
+  });
+  if (!group) throw new Error("NOT_FOUND");
+  return group;
+}
+
+/**
+ * Switch a round between the plain "single" mode and "groups" (block against
+ * block). Nothing is thrown away: existing tiles become the cards of the first
+ * blocks (chunked by the per-block cap, so a round of 7 lands as 5 + 2) and a
+ * second block is created empty when there is only one. Back to single, the
+ * cards stay tiles of the round in block order.
+ */
+export async function setRoundMode(userId: string, roundId: string, mode: string) {
+  if (!(ROUND_MODES as readonly string[]).includes(mode)) throw new Error("BAD_MODE");
+  const round = await prisma.pickerRound.findFirst({
+    where: { id: roundId, project: { userId } },
+    include: {
+      tiles: { orderBy: { order: "asc" } },
+      groups: { orderBy: { order: "asc" }, include: { tiles: { orderBy: { order: "asc" } } } },
+    },
+  });
+  if (!round) throw new Error("NOT_FOUND");
+  if (round.mode === mode) return touch(round.projectId);
+
+  if (mode === "groups") {
+    const chunks: string[][] = [];
+    for (const tile of round.tiles) {
+      const last = chunks[chunks.length - 1];
+      if (!last || last.length >= MAX_GROUP_TILES) chunks.push([tile.id]);
+      else last.push(tile.id);
+    }
+    while (chunks.length < MIN_GROUPS) chunks.push([]);
+    for (let gi = 0; gi < chunks.length; gi++) {
+      const group = await prisma.pickerGroup.create({ data: { roundId, order: gi } });
+      await prisma.$transaction(
+        chunks[gi].map((id, i) =>
+          prisma.pickerTile.update({
+            where: { id },
+            data: { groupId: group.id, order: i, isAnswer: false },
+          }),
+        ),
+      );
+    }
+  } else {
+    // Flatten: block order then card order becomes the tile order of the round.
+    const flat = round.groups.flatMap((g) => g.tiles);
+    await prisma.$transaction([
+      ...flat.map((tile, i) =>
+        prisma.pickerTile.update({ where: { id: tile.id }, data: { groupId: null, order: i } }),
+      ),
+      prisma.pickerGroup.deleteMany({ where: { roundId } }),
+    ]);
+  }
+  await prisma.pickerRound.update({ where: { id: roundId }, data: { mode } });
+  return touch(round.projectId);
+}
+
+export async function addGroup(userId: string, roundId: string, label?: string | null) {
+  const round = await prisma.pickerRound.findFirst({
+    where: { id: roundId, project: { userId } },
+    include: { groups: true },
+  });
+  if (!round) throw new Error("NOT_FOUND");
+  if (round.mode !== "groups") throw new Error("NOT_GROUPS");
+  if (round.groups.length >= MAX_GROUPS) throw new Error("TOO_MANY_GROUPS");
+  const group = await prisma.pickerGroup.create({
+    data: { roundId, order: round.groups.length, label: label?.trim() || null },
+  });
+  await touch(round.projectId);
+  return group;
+}
+
+export interface GroupPatch {
+  label?: string | null;
+  isAnswer?: boolean;
+}
+
+export async function patchGroup(userId: string, groupId: string, patch: GroupPatch) {
+  const group = await ownedGroup(userId, groupId);
+  const data: Record<string, unknown> = {};
+  if (patch.label !== undefined) data.label = patch.label?.trim() || null;
+  if (patch.isAnswer !== undefined) {
+    data.isAnswer = Boolean(patch.isAnswer);
+    if (patch.isAnswer) {
+      // at most one winning block per round
+      await prisma.pickerGroup.updateMany({
+        where: { roundId: group.roundId, id: { not: group.id } },
+        data: { isAnswer: false },
+      });
+    }
+  }
+  const updated = await prisma.pickerGroup.update({ where: { id: group.id }, data });
+  await touch(group.round.projectId);
+  return updated;
+}
+
+/** Delete a block together with its cards (they only exist inside a block). */
+export async function deleteGroup(userId: string, groupId: string) {
+  const group = await ownedGroup(userId, groupId);
+  await prisma.pickerGroup.delete({ where: { id: group.id } });
+  await renumber("pickerGroup", { roundId: group.roundId });
+  return touch(group.round.projectId);
+}
+
+/** Move a card to another block of the same round, appending it at the end. */
+export async function moveTileToGroup(userId: string, tileId: string, groupId: string) {
+  const tile = await prisma.pickerTile.findFirst({
+    where: { id: tileId, round: { project: { userId } } },
+    include: { round: true },
+  });
+  if (!tile) throw new Error("NOT_FOUND");
+  const group = await ownedGroup(userId, groupId);
+  if (group.roundId !== tile.roundId) throw new Error("BAD_GROUP");
+  if (group.id === tile.groupId) return tile;
+  if (group.tiles.length >= MAX_GROUP_TILES) throw new Error("TOO_MANY_TILES");
+
+  const from = tile.groupId;
+  const updated = await prisma.pickerTile.update({
+    where: { id: tile.id },
+    data: { groupId: group.id, order: group.tiles.length },
+  });
+  if (from) await renumber("pickerTile", { groupId: from });
+  await touch(tile.round.projectId);
+  return updated;
+}
+
+/** Add a card from the pool to a block of a group round. */
+export async function addTileToGroup(userId: string, groupId: string, artId: string) {
+  const group = await ownedGroup(userId, groupId);
+  if (group.round.mode !== "groups") throw new Error("NOT_GROUPS");
+  if (group.tiles.length >= MAX_GROUP_TILES) throw new Error("TOO_MANY_TILES");
+  const art = await prisma.art.findFirst({ where: { id: artId, userId } });
+  if (!art || (art.kind !== "image" && art.kind !== "video")) throw new Error("BAD_ART");
+  const tile = await prisma.pickerTile.create({
+    data: {
+      roundId: group.roundId,
+      groupId: group.id,
+      artId,
+      order: group.tiles.length,
+    },
+  });
+  await prisma.art.update({ where: { id: artId }, data: { lastUsedAt: new Date() } });
+  await touch(group.round.projectId);
+  return tile;
+}
+
 // ---- Picker tiles ----
 
 export async function addTile(userId: string, roundId: string, artId: string) {
   const round = await ownedRound(userId, roundId);
+  if (round.mode !== "single") throw new Error("NOT_SINGLE");
   if (round.tiles.length >= MAX_TILES) throw new Error("TOO_MANY_TILES");
   const art = await prisma.art.findFirst({ where: { id: artId, userId } });
   if (!art || (art.kind !== "image" && art.kind !== "video")) throw new Error("BAD_ART");
@@ -519,10 +688,15 @@ async function touch(projectId: string) {
 
 /** Re-pack `order` to 0..N-1 after a delete. */
 async function renumber(
-  model: "pickerRound" | "pickerTile",
-  where: { projectId?: string; roundId?: string },
+  model: "pickerRound" | "pickerTile" | "pickerGroup",
+  where: { projectId?: string; roundId?: string; groupId?: string },
 ) {
-  if (model === "pickerRound") {
+  if (model === "pickerGroup") {
+    const rows = await prisma.pickerGroup.findMany({ where, orderBy: { order: "asc" } });
+    await prisma.$transaction(
+      rows.map((r, i) => prisma.pickerGroup.update({ where: { id: r.id }, data: { order: i } })),
+    );
+  } else if (model === "pickerRound") {
     const rows = await prisma.pickerRound.findMany({ where, orderBy: { order: "asc" } });
     await prisma.$transaction(
       rows.map((r, i) => prisma.pickerRound.update({ where: { id: r.id }, data: { order: i } })),

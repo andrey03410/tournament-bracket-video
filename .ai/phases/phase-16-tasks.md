@@ -25,7 +25,7 @@
 - [x] **Task 1: Геометрия.** `groupLayout(counts, orientation)` в
   `lib/domain/picker-layout.ts` + юнит-тесты (симметрия, асимметрия, выбор
   разбиения, портрет, границы зоны).
-- [ ] **Task 2: Схема и сервис.** `PickerRound.mode`, таблица `PickerGroup`,
+- [x] **Task 2: Схема и сервис.** `PickerRound.mode`, таблица `PickerGroup`,
   `PickerTile.groupId`; `setRoundMode`, `addGroup`, `patchGroup`, `deleteGroup`,
   `moveTileToGroup`, `addTile` в блок; лимиты + `invalidRounds`. Интеграционные
   тесты на реальной БД.

@@ -6,7 +6,11 @@ import { prisma } from "@/lib/db";
 import { absPath, renderOutputPath } from "@/lib/storage";
 import { clipAudio, clipVideo, writeTick } from "@/lib/audio";
 import { cropFromColumns, type FitMode } from "@/lib/domain/art-crop";
-import { effectiveOrientation, type TileOrientation } from "@/lib/domain/picker-layout";
+import {
+  effectiveOrientation,
+  MIN_GROUPS,
+  type TileOrientation,
+} from "@/lib/domain/picker-layout";
 import {
   buildPickerPlan,
   type BookendsInput,
@@ -130,23 +134,41 @@ export function buildPickerPreviewPlan(project: LoadedProject) {
   return buildPickerPlan(defaults(project), rounds, playlist, bookends(project));
 }
 
-/** Rounds must have 2..9 tiles to be renderable; returns 1-based bad indexes. */
+/**
+ * A round is renderable when it has 2..9 tiles, or — in group mode — at least
+ * two blocks with at least one card each. Returns 1-based indexes of the rest.
+ */
+export function roundIsRenderable(round: {
+  mode: string;
+  tiles: { id: string }[];
+  groups: { tiles: { id: string }[] }[];
+}): boolean {
+  if (round.mode === "groups") {
+    return round.groups.length >= MIN_GROUPS && round.groups.every((g) => g.tiles.length > 0);
+  }
+  return round.tiles.length >= 2;
+}
+
 export function invalidRounds(project: LoadedProject): number[] {
   return project.rounds
-    .map((r, i) => ({ n: i + 1, count: r.tiles.length }))
-    .filter((r) => r.count < 2)
+    .map((round, i) => ({ n: i + 1, ok: roundIsRenderable(round) }))
+    .filter((r) => !r.ok)
     .map((r) => r.n);
 }
 
 export async function startPickerRenderJob(userId: string, projectId: string) {
   const project = await prisma.videoProject.findFirst({
     where: { id: projectId, userId, kind: "picker" },
-    include: { rounds: { include: { tiles: true } } },
+    include: { rounds: { include: { tiles: true, groups: { include: { tiles: true } } } } },
   });
   if (!project) throw new Error("NOT_FOUND");
   if (project.rounds.length === 0 || project.rounds.every((r) => r.tiles.length === 0))
     throw new Error("EMPTY_PROJECT");
-  if (project.rounds.some((r) => r.tiles.length === 1)) throw new Error("ROUND_TOO_SMALL");
+  // Non-empty rounds must be renderable: 2+ tiles, or 2+ non-empty blocks.
+  if (
+    project.rounds.some((r) => r.tiles.length > 0 && !roundIsRenderable(r))
+  )
+    throw new Error("ROUND_TOO_SMALL");
 
   const job = await prisma.renderJob.create({
     data: { projectId, status: "queued", progress: 0 },
@@ -188,6 +210,10 @@ async function runPickerRender(jobId: string): Promise<void> {
           bgArt: true,
           bgMusicArt: true,
           tiles: { orderBy: { order: "asc" }, include: { art: true } },
+          groups: {
+            orderBy: { order: "asc" },
+            include: { tiles: { orderBy: { order: "asc" }, include: { art: true } } },
+          },
         },
       },
     },
