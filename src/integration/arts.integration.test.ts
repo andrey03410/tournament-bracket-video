@@ -8,6 +8,8 @@ import {
   createArt,
   renameArt,
   deleteArt,
+  deleteArts,
+  MAX_BULK_DELETE,
 } from "@/server/arts";
 import { patchRenderItem } from "@/server/render-items";
 
@@ -288,5 +290,63 @@ describe("art usage breakdown", () => {
       total: 0,
     });
     await deleteArt(userId, lonely.id);
+  });
+});
+
+// Phase 17: cleaning a pool of a thousand posters one file at a time is the
+// reason bulk delete exists; partial failures must not stop the rest.
+describe("bulk delete", () => {
+  it("deletes many at once, wipes their files and reports the ids", async () => {
+    const a = await createArt(userId, { fileName: "bulk-a.png", data: PNG });
+    const b = await createArt(userId, { fileName: "bulk-b.png", data: PNG });
+    const paths = [absPath(a.filePath), absPath(b.filePath)];
+
+    const res = await deleteArts(userId, [a.id, b.id]);
+    expect(res.deleted.sort()).toEqual([a.id, b.id].sort());
+    expect(res.failed).toEqual([]);
+    expect(paths.some((p) => existsSync(p))).toBe(false);
+    expect(await prisma.art.count({ where: { id: { in: [a.id, b.id] } } })).toBe(0);
+  });
+
+  it("skips what it cannot delete and still deletes the rest", async () => {
+    const mine = await createArt(userId, { fileName: "bulk-mine.png", data: PNG });
+    const foreign = await createArt(otherUserId, { fileName: "bulk-foreign.png", data: PNG });
+
+    const res = await deleteArts(userId, [mine.id, foreign.id, "cmsnosuchid0000000000000"]);
+    expect(res.deleted).toEqual([mine.id]);
+    expect(res.failed.map((f) => f.id).sort()).toEqual(
+      [foreign.id, "cmsnosuchid0000000000000"].sort(),
+    );
+    expect(res.failed.every((f) => f.reason === "NOT_FOUND")).toBe(true);
+    // the other user's media is untouched
+    expect(await prisma.art.count({ where: { id: foreign.id } })).toBe(1);
+    await deleteArt(otherUserId, foreign.id);
+  });
+
+  it("takes the cards of a deleted media with it, as a single delete does", async () => {
+    const art = await createArt(userId, { fileName: "bulk-card.png", data: PNG });
+    const project = await prisma.videoProject.create({
+      data: { userId, title: "Bulk IT", kind: "picker" },
+    });
+    const round = await prisma.pickerRound.create({
+      data: { projectId: project.id, order: 0 },
+    });
+    await prisma.pickerTile.create({ data: { roundId: round.id, artId: art.id, order: 0 } });
+
+    await deleteArts(userId, [art.id]);
+    expect(await prisma.pickerTile.count({ where: { roundId: round.id } })).toBe(0);
+    await prisma.videoProject.delete({ where: { id: project.id } });
+  });
+
+  it("ignores duplicate ids and refuses an empty or oversized batch", async () => {
+    const art = await createArt(userId, { fileName: "bulk-dup.png", data: PNG });
+    const res = await deleteArts(userId, [art.id, art.id]);
+    expect(res.deleted).toEqual([art.id]);
+    expect(res.failed).toEqual([]);
+
+    await expect(deleteArts(userId, [])).rejects.toThrow("NO_IDS");
+    await expect(
+      deleteArts(userId, Array.from({ length: MAX_BULK_DELETE + 1 }, (_, i) => `id${i}`)),
+    ).rejects.toThrow("TOO_MANY");
   });
 });

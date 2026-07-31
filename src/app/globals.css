@@ -560,6 +560,37 @@ audio {
 }
 
 /* ---- phase 9: shikimori panel ---- */
+.art-card .pick {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.art-card:hover .pick,
+.art-card.picked .pick {
+  opacity: 1;
+}
+.art-card.picked {
+  border-color: var(--accent);
+}
+
+.select-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  font-size: 13px;
+}
+
 .rename-field {
   display: block;
   position: relative;

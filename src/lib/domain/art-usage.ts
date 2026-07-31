@@ -36,8 +36,22 @@ export function usageBreakdown(counts: ArtRelationCounts): UsageBreakdown {
   return { positions, cards, playlist, backgrounds, total: positions + cards + playlist + backgrounds };
 }
 
+/** Sum the breakdowns of a selection (bulk delete warns about the whole batch). */
+export function sumUsage(list: UsageBreakdown[]): UsageBreakdown {
+  return list.reduce<UsageBreakdown>(
+    (acc, u) => ({
+      positions: acc.positions + u.positions,
+      cards: acc.cards + u.cards,
+      playlist: acc.playlist + u.playlist,
+      backgrounds: acc.backgrounds + u.backgrounds,
+      total: acc.total + u.total,
+    }),
+    { positions: 0, cards: 0, playlist: 0, backgrounds: 0, total: 0 },
+  );
+}
+
 /** Russian plural: [one, few, many] — "1 карточка", "3 карточки", "5 карточек". */
-function plural(n: number, forms: [string, string, string]): string {
+export function pluralRu(n: number, forms: [string, string, string]): string {
   const mod100 = n % 100;
   const mod10 = n % 10;
   if (mod100 >= 11 && mod100 <= 14) return forms[2];
@@ -54,22 +68,22 @@ export function describeUsage(u: UsageBreakdown): string {
   const parts: string[] = [];
   if (u.cards)
     parts.push(
-      `${u.cards} ${plural(u.cards, ["карточка", "карточки", "карточек"])} ${
+      `${u.cards} ${pluralRu(u.cards, ["карточка", "карточки", "карточек"])} ${
         isOne(u.cards) ? "в раунде" : "в раундах"
       }`,
     );
   if (u.positions)
     parts.push(
-      `${u.positions} ${plural(u.positions, ["позиция", "позиции", "позиций"])} топа`,
+      `${u.positions} ${pluralRu(u.positions, ["позиция", "позиции", "позиций"])} топа`,
     );
   if (u.playlist)
     parts.push(
-      `${u.playlist} ${plural(u.playlist, ["трек", "трека", "треков"])} ${
+      `${u.playlist} ${pluralRu(u.playlist, ["трек", "трека", "треков"])} ${
         isOne(u.playlist) ? "в плейлисте" : "в плейлистах"
       }`,
     );
   if (u.backgrounds)
-    parts.push(`${u.backgrounds} ${plural(u.backgrounds, ["фон", "фона", "фонов"])}`);
+    parts.push(`${u.backgrounds} ${pluralRu(u.backgrounds, ["фон", "фона", "фонов"])}`);
   return parts.join(", ");
 }
 
@@ -79,25 +93,25 @@ export function describeDeletion(u: UsageBreakdown): string {
   const parts: string[] = [];
   if (u.cards)
     parts.push(
-      `${u.cards} ${plural(u.cards, ["карточка", "карточки", "карточек"])} ${
+      `${u.cards} ${pluralRu(u.cards, ["карточка", "карточки", "карточек"])} ${
         isOne(u.cards) ? "в раунде будет удалена" : "в раундах будут удалены"
       }`,
     );
   if (u.playlist)
     parts.push(
-      `${u.playlist} ${plural(u.playlist, ["трек", "трека", "треков"])} ${
+      `${u.playlist} ${pluralRu(u.playlist, ["трек", "трека", "треков"])} ${
         isOne(u.playlist) ? "выпадет из плейлиста" : "выпадут из плейлистов"
       }`,
     );
   if (u.positions)
     parts.push(
-      `${u.positions} ${plural(u.positions, ["позиция", "позиции", "позиций"])} топа ${
+      `${u.positions} ${pluralRu(u.positions, ["позиция", "позиции", "позиций"])} топа ${
         isOne(u.positions) ? "освободится" : "освободятся"
       }`,
     );
   if (u.backgrounds)
     parts.push(
-      `${u.backgrounds} ${plural(u.backgrounds, ["фон", "фона", "фонов"])} ${
+      `${u.backgrounds} ${pluralRu(u.backgrounds, ["фон", "фона", "фонов"])} ${
         isOne(u.backgrounds) ? "сбросится" : "сбросятся"
       }`,
     );

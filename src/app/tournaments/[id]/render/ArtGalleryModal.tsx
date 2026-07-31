@@ -6,6 +6,8 @@ import type { ArtCrop } from "@/lib/domain/art-crop";
 import {
   describeUsage,
   describeDeletion,
+  sumUsage,
+  pluralRu,
   type UsageBreakdown,
 } from "@/lib/domain/art-usage";
 import { ImportSources } from "@/app/components/ImportSources";
@@ -169,8 +171,11 @@ export function ArtGalleryModal({
       ? { artId: null, artUrl: cropTarget.artUrl, kind: cropTarget.kind, crop: cropTarget.crop }
       : null,
   );
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkError, setBulkError] = useState<string | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const loadingRef = useRef(false);
+  const lastPickedRef = useRef<number | null>(null);
 
   const loadFirstPage = useCallback(async (q: string, kind: "" | GalleryKind) => {
     const data = await fetchArts({
@@ -258,6 +263,63 @@ export function ArtGalleryModal({
     onPoolChange?.();
   }
 
+  /** Click toggles one card; Shift-click extends the selection to a range. */
+  function toggleSelected(index: number, id: string, shift: boolean) {
+    // The range is resolved here, not inside the updater: React runs the updater
+    // at render time, when the anchor ref already points at this very click.
+    const anchor = lastPickedRef.current;
+    const range =
+      shift && anchor !== null && index >= 0
+        ? arts.slice(Math.min(anchor, index), Math.max(anchor, index) + 1).map((a) => a.id)
+        : null;
+    setBulkError(null);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (range) {
+        for (const rangeId of range) next.add(rangeId);
+      } else if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+    lastPickedRef.current = index;
+  }
+
+  async function removeSelected() {
+    const ids = [...selected];
+    if (!ids.length) return;
+    const chosen = arts.filter((a) => selected.has(a.id));
+    const consequences = describeDeletion(sumUsage(chosen.map((a) => a.usage)));
+    const what = `${ids.length} ${pluralRu(ids.length, ["файл", "файла", "файлов"])}`;
+    if (
+      !confirm(
+        `Удалить ${what} из пула?${consequences ? ` ${consequences}.` : ""} Действие необратимо.`,
+      )
+    )
+      return;
+
+    const res = await fetch("/api/arts", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setBulkError(data.error ?? "Не удалось удалить");
+      return;
+    }
+    const gone = new Set<string>(data.deleted ?? []);
+    setArts((prev) => prev.filter((a) => !gone.has(a.id)));
+    setRecent((prev) => prev.filter((a) => !gone.has(a.id)));
+    setSelected(new Set());
+    lastPickedRef.current = null;
+    onPoolChange?.();
+    const failed = (data.failed ?? []).length;
+    setBulkError(failed ? `Не удалось удалить: ${failed}` : null);
+  }
+
   const title =
     cropArt != null
       ? `Обрезка (рамка ${aspect === 2 / 3 ? "2:3" : "16:9"})`
@@ -268,11 +330,13 @@ export function ArtGalleryModal({
   const visible = (list: GalleryArt[]) =>
     mode === "pick" ? list.filter((a) => pickKinds.includes(a.kind)) : list;
 
-  function card(a: GalleryArt, selectable: boolean) {
+  function card(a: GalleryArt, selectable: boolean, index = -1) {
     return (
       <div
         key={a.id}
-        className={`art-card${selectable ? " selectable" : ""}`}
+        className={`art-card${selectable ? " selectable" : ""}${
+          selected.has(a.id) ? " picked" : ""
+        }`}
         onClick={
           selectable
             ? () =>
@@ -305,6 +369,17 @@ export function ArtGalleryModal({
         ) : null}
         {mode === "manage" ? (
           <>
+            <input
+              type="checkbox"
+              className="pick"
+              title="Выбрать (Shift — диапазон)"
+              checked={selected.has(a.id)}
+              readOnly
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleSelected(index, a.id, e.shiftKey);
+              }}
+            />
             <div className="meta">
               <RenameField value={a.label} onSave={(next) => rename(a, next)} />
               <span className="art-usage" title={describeUsage(a.usage)}>
@@ -395,6 +470,28 @@ export function ArtGalleryModal({
                 </div>
               </div>
 
+              {mode === "manage" && selected.size > 0 ? (
+                <div className="select-bar">
+                  <span>
+                    Выбрано {selected.size}{" "}
+                    {pluralRu(selected.size, ["файл", "файла", "файлов"])}
+                  </span>
+                  <button className="btn secondary" onClick={() => void removeSelected()}>
+                    Удалить выбранные
+                  </button>
+                  <button
+                    className="btn ghost"
+                    onClick={() => {
+                      setSelected(new Set());
+                      lastPickedRef.current = null;
+                    }}
+                  >
+                    Снять выделение
+                  </button>
+                </div>
+              ) : null}
+              {bulkError ? <div className="error" style={{ marginBottom: 10 }}>{bulkError}</div> : null}
+
               {mode === "pick" && recent.length > 0 && !query && !kindFilter ? (
                 <>
                   <p className="muted" style={{ fontSize: 13, margin: "0 0 8px" }}>Недавние</p>
@@ -412,7 +509,9 @@ export function ArtGalleryModal({
                     : "Пул пуст — загрузите первые картинки или видео."}
                 </p>
               ) : (
-                <div className="art-grid">{visible(arts).map((a) => card(a, mode === "pick"))}</div>
+                <div className="art-grid">
+                  {visible(arts).map((a, i) => card(a, mode === "pick", i))}
+                </div>
               )}
               <div ref={sentinelRef} style={{ height: 1 }} />
             </>

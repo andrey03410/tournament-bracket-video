@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { usageBreakdown, describeUsage, describeDeletion } from "./art-usage";
+import {
+  usageBreakdown,
+  describeUsage,
+  describeDeletion,
+  sumUsage,
+  pluralRu,
+} from "./art-usage";
 
 const counts = {
   renderItems: 0,
@@ -90,5 +96,42 @@ describe("describeDeletion", () => {
 
   it("is empty when there is nothing to warn about", () => {
     expect(describeDeletion(usageBreakdown(counts))).toBe("");
+  });
+});
+
+describe("sumUsage", () => {
+  it("adds up the breakdowns of a selection", () => {
+    const a = usageBreakdown({ ...counts, pickerTiles: 2, renderItems: 1 });
+    const b = usageBreakdown({ ...counts, pickerTiles: 1, playlistItems: 3 });
+    expect(sumUsage([a, b])).toEqual({
+      positions: 1,
+      cards: 3,
+      playlist: 3,
+      backgrounds: 0,
+      total: 7,
+    });
+  });
+
+  it("is all zeros for an empty selection", () => {
+    expect(sumUsage([])).toEqual({
+      positions: 0,
+      cards: 0,
+      playlist: 0,
+      backgrounds: 0,
+      total: 0,
+    });
+  });
+});
+
+describe("pluralRu", () => {
+  it("picks the Russian form by the number", () => {
+    const files: [string, string, string] = ["файл", "файла", "файлов"];
+    expect(pluralRu(1, files)).toBe("файл");
+    expect(pluralRu(2, files)).toBe("файла");
+    expect(pluralRu(5, files)).toBe("файлов");
+    expect(pluralRu(11, files)).toBe("файлов");
+    expect(pluralRu(21, files)).toBe("файл");
+    expect(pluralRu(112, files)).toBe("файлов");
+    expect(pluralRu(0, files)).toBe("файлов");
   });
 });

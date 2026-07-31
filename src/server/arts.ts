@@ -319,3 +319,34 @@ export async function deleteArt(userId: string, artId: string) {
   await removePath(art.filePath);
   if (art.posterPath) await removePath(art.posterPath);
 }
+
+/** One cleanup pass must not be able to wipe the whole pool by accident. */
+export const MAX_BULK_DELETE = 200;
+
+export interface BulkDeleteResult {
+  deleted: string[];
+  failed: { id: string; reason: string }[];
+}
+
+/**
+ * Delete several pool media in one pass (phase 17). Each id goes through
+ * `deleteArt`, so the cascade and the freeing of top positions are identical to
+ * a single delete; an id that cannot be deleted is reported, not fatal.
+ */
+export async function deleteArts(userId: string, ids: string[]): Promise<BulkDeleteResult> {
+  const unique = [...new Set(ids.filter((id) => typeof id === "string" && id))];
+  if (!unique.length) throw new Error("NO_IDS");
+  if (unique.length > MAX_BULK_DELETE) throw new Error("TOO_MANY");
+
+  const deleted: string[] = [];
+  const failed: { id: string; reason: string }[] = [];
+  for (const id of unique) {
+    try {
+      await deleteArt(userId, id);
+      deleted.push(id);
+    } catch (e) {
+      failed.push({ id, reason: (e as Error).message || "FAILED" });
+    }
+  }
+  return { deleted, failed };
+}

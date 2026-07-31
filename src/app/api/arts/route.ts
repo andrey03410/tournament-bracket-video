@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { userOr401, permissionOr403, badRequest, tooLarge } from "@/lib/api";
+import { userOr401, permissionOr403, badRequest, tooLarge, serverError } from "@/lib/api";
 import { formatBytes, quotasFor } from "@/lib/domain/permissions";
 import { artDto as serialize } from "@/lib/art-dto";
-import { listArts, listRecentArts, createArt } from "@/server/arts";
+import { listArts, listRecentArts, createArt, deleteArts, MAX_BULK_DELETE } from "@/server/arts";
 
 // Pool uploads are single media files; keep a sane ceiling well under the
 // tournament-archive limit. Roles with a pool quota get the tighter of the two.
@@ -70,5 +70,25 @@ export async function POST(req: Request) {
       );
     if ((e as Error).message === "POOL_QUOTA") return tooLarge(quotaMsg);
     throw e;
+  }
+}
+
+/** Bulk cleanup: delete every media in `ids` the user owns, reporting the rest. */
+export async function DELETE(req: Request) {
+  const auth = await userOr401();
+  if ("response" in auth) return auth.response;
+
+  const body = await req.json().catch(() => ({}));
+  const ids = Array.isArray(body.ids) ? body.ids.map(String) : [];
+
+  try {
+    const result = await deleteArts(auth.userId, ids);
+    return NextResponse.json(result);
+  } catch (e) {
+    const msg = (e as Error).message;
+    if (msg === "NO_IDS") return badRequest("Не выбрано ни одного файла");
+    if (msg === "TOO_MANY")
+      return badRequest(`За один раз можно удалить не больше ${MAX_BULK_DELETE} файлов`);
+    return serverError(e);
   }
 }
