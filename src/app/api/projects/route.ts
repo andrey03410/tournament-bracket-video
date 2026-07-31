@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { userOr401, permissionOr403, badRequest } from "@/lib/api";
+import { userOr401, permissionOr403, badRequest, serverError } from "@/lib/api";
 import { createProject, listProjects } from "@/server/projects";
 
 export async function GET() {
@@ -40,6 +40,6 @@ export async function POST(req: Request) {
     const msg = (e as Error).message;
     if (msg === "BAD_KIND") return badRequest("Неизвестный режим видео");
     if (msg === "NO_TITLE") return badRequest("Укажите название");
-    throw e;
+    return serverError(e);
   }
 }

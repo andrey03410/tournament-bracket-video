@@ -87,7 +87,7 @@ MCP-инструменты `create_picker_project`/`add_round` принимаю�
 старую `/system`-копию.
 Стек: Next.js + Prisma (SQLite) + Auth.js + Remotion + ffmpeg-static +
 react-easy-crop. Запуск и инструкции — в [`README.md`](README.md). Доменная
-логика и сервисный слой покрыты тестами (`npm test`, 339 тестов, включая
+логика и сервисный слой покрыты тестами (`npm test`, 350 тестов, включая
 интеграционные на реальной БД); ffmpeg-пайплайн, полный HTTP E2E (включая
 ролевой и проектный), UI-сценарии (headless Chrome) и headless-рендеры MP4
 (топ и пикер, кадры проверены) провалидированы — рецепт в

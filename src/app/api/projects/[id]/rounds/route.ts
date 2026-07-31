@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { userOr401, badRequest, notFound } from "@/lib/api";
+import { userOr401, badRequest, notFound, serverError } from "@/lib/api";
 import { addRound, reorderRounds } from "@/server/projects";
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
@@ -20,6 +20,6 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     if (msg === "NOT_PICKER") return badRequest("Раунды есть только у пикер-видео");
     if (msg === "TOO_MANY_ROUNDS") return badRequest("Слишком много раундов (лимит 50)");
     if (msg === "INVALID_ORDER") return badRequest("Некорректный порядок раундов");
-    throw e;
+    return serverError(e);
   }
 }

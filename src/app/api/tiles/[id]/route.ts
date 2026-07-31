@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { userOr401, badRequest, notFound } from "@/lib/api";
+import { userOr401, badRequest, notFound, serverError } from "@/lib/api";
 import { patchTile, deleteTile } from "@/server/projects";
 
 const ERRORS: Record<string, string> = {
@@ -19,7 +19,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     const msg = (e as Error).message;
     if (msg === "NOT_FOUND") return notFound();
     if (ERRORS[msg]) return badRequest(ERRORS[msg]);
-    throw e;
+    return serverError(e);
   }
 }
 
@@ -31,6 +31,6 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
     return NextResponse.json({ ok: true });
   } catch (e) {
     if ((e as Error).message === "NOT_FOUND") return notFound();
-    throw e;
+    return serverError(e);
   }
 }

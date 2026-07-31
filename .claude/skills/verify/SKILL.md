@@ -14,6 +14,10 @@ npm run dev   # http://localhost:3000 (в фоне; лог в файл)
 После изменений `prisma/schema.prisma`: `npx prisma db push && npx prisma generate`
 и **обязательно перезапустить dev-сервер** — работающий процесс держит старый
 Prisma-клиент в памяти и падает 500 «Unknown argument <новое поле>».
+`npm run dev` сам делает `prisma generate` перед стартом, а если клиент всё же
+устарел, ответ 500 приходит с человеческим текстом (`serverError` +
+`staleClientHint`) и виден прямо в UI; `src/lib/prisma-client.test.ts` ловит
+забытый `prisma generate` в `npm test`.
 
 ## Сид данных (готовый завершённый турнир)
 

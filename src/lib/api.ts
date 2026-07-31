@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { requireUser, type SessionUser } from "@/auth";
 import { can, type Permission } from "@/lib/domain/permissions";
 
+export { serverError } from "@/lib/api-errors";
+
 /**
  * Resolve the current user (id + fresh role) or return a 401 response to
  * short-circuit a route.

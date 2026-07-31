@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { userOr401, badRequest, notFound } from "@/lib/api";
+import { userOr401, badRequest, notFound, serverError } from "@/lib/api";
 import { setPlaylist } from "@/server/projects";
 
 /** Replace the project's background-music playlist (ordered audio art ids). */
@@ -20,6 +20,6 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
     if (msg === "NOT_PICKER") return badRequest("Плейлист есть только у пикер-видео");
     if (msg === "BAD_MUSIC") return badRequest("В плейлист можно добавлять только аудио из пула");
     if (msg === "TOO_MANY_TRACKS") return badRequest("Слишком много треков (лимит 50)");
-    throw e;
+    return serverError(e);
   }
 }
