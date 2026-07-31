@@ -37,7 +37,7 @@
 - [x] **Task 5: Конструктор.** Переключатель режима, колонки блоков, перенос
   карточек стрелками, название и отметка ответа, подсказки валидации;
   UI-прогон в headless Chrome.
-- [ ] **Task 6: MCP.** `add_group`/`set_group`/`delete_group`, `mode` в
+- [x] **Task 6: MCP.** `add_group`/`set_group`/`delete_group`, `mode` в
   `add_round`, `groupId` в `add_tile`/`add_tile_from_shikimori`, блоки в
   `get_project` + e2e через stdio.
 - [ ] **Task 7: Документация и финальная проверка.** README (таблица

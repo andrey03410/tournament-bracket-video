@@ -10,6 +10,7 @@ import {
 import { USER_RATE_STATUSES } from "@/lib/domain/shikimori";
 import {
   createProject, getProject, addRound, patchRound, deleteRound, addTile, patchTile, patchProject, setPlaylist,
+  setRoundMode, addGroup, patchGroup, deleteGroup, addTileToGroup, listGroups,
 } from "@/server/projects";
 import { absPath } from "@/lib/storage";
 import { listArts, type PoolKind } from "@/server/arts";
@@ -29,6 +30,10 @@ const fail = (message: string): ToolResult => ({
   content: [{ type: "text", text: JSON.stringify({ error: message }) }],
   isError: true,
 });
+
+/** Block ids of a round, in display order (empty for a plain round). */
+const groupIdsOf = async (uid: string, roundId: string) =>
+  (await listGroups(uid, roundId)).map((g) => g.id);
 
 /** Wrap a handler so service-layer throws become tool errors, not crashes. */
 function guard(fn: () => Promise<unknown>): Promise<ToolResult> {
@@ -199,17 +204,23 @@ async function main() {
   );
   server.registerTool(
     "add_round",
-    { description: "Добавить раунд в пикер. Необязательные поля настраивают вопрос/таймер/показ ответа/подписи/ориентацию. → {roundId}",
+    { description:
+        "Добавить раунд в пикер. mode: \"single\" (по умолчанию — 2-9 отдельных блоков) или " +
+        "\"groups\" (сравнение блок к блоку: раунд сразу получает два пустых блока, дальше " +
+        "add_tile/add_tile_from_shikimori с groupId). Необязательные поля настраивают " +
+        "вопрос/таймер/показ/подписи/ориентацию. → {roundId, groupIds}",
       inputSchema: {
         projectId: z.string(),
+        mode: z.enum(["single", "groups"]).optional(),
         prompt: z.string().optional(),
         timerSec: z.number().optional(),
         revealSec: z.number().optional(),
         labelsMode: z.enum(["always", "finale", "never"]).optional(),
         orientation: z.enum(["landscape", "portrait"]).optional(),
       } },
-    ({ projectId, prompt, timerSec, revealSec, labelsMode, orientation }) => guard(async () => {
+    ({ projectId, mode, prompt, timerSec, revealSec, labelsMode, orientation }) => guard(async () => {
       const round = await addRound(uid, projectId);
+      if (mode === "groups") await setRoundMode(uid, round.id, "groups");
       if (prompt != null || timerSec != null || revealSec != null || labelsMode != null || orientation != null) {
         await patchRound(uid, round.id, {
           ...(prompt != null ? { prompt, showPrompt: true } : {}),
@@ -219,18 +230,28 @@ async function main() {
           ...(orientation != null ? { tileOrientation: orientation } : {}),
         });
       }
-      return { roundId: round.id };
+      const groupIds = mode === "groups"
+        ? (await groupIdsOf(uid, round.id))
+        : [];
+      return { roundId: round.id, groupIds };
     }),
   );
   server.registerTool(
     "add_tile",
-    { description: "Добавить плитку из уже импортированного арта (image/video) в раунд. → {tileId}",
+    { description:
+        "Добавить плитку из уже импортированного арта (image/video). Обычному раунду передавайте " +
+        "roundId, групповому — groupId нужного блока (≤ 5 карточек в блоке). isAnswer работает " +
+        "только в обычном раунде: в групповом победителя отмечает set_group. → {tileId}",
       inputSchema: {
-        roundId: z.string(), artId: z.string(), label: z.string().optional(), isAnswer: z.boolean().optional(),
+        roundId: z.string().optional(), groupId: z.string().optional(),
+        artId: z.string(), label: z.string().optional(), isAnswer: z.boolean().optional(),
         fitMode: z.enum(["cover", "fill", "contain"]).optional(),
       } },
-    ({ roundId, artId, label, isAnswer, fitMode }) => guard(async () => {
-      const tile = await addTile(uid, roundId, artId);
+    ({ roundId, groupId, artId, label, isAnswer, fitMode }) => guard(async () => {
+      if (!roundId && !groupId) throw new Error("Укажите roundId или groupId");
+      const tile = groupId
+        ? await addTileToGroup(uid, groupId, artId)
+        : await addTile(uid, roundId!, artId);
       if (label != null || isAnswer || fitMode != null) {
         await patchTile(uid, tile.id, {
           ...(label != null ? { label } : {}),
@@ -243,17 +264,21 @@ async function main() {
   );
   server.registerTool(
     "add_tile_from_shikimori",
-    { description: "Импортировать постер Shikimori и добавить плиткой в раунд одним вызовом. → {tileId, artId}",
+    { description:
+        "Импортировать постер Shikimori и добавить карточкой одним вызовом: roundId для обычного " +
+        "раунда, groupId для блока группового. → {tileId, artId}",
       inputSchema: {
-        roundId: z.string(), type: z.enum(["anime", "character"]), id: z.number(),
+        roundId: z.string().optional(), groupId: z.string().optional(),
+        type: z.enum(["anime", "character"]), id: z.number(),
         posterPath: z.string(), label: z.string().optional(), isAnswer: z.boolean().optional(),
         fitMode: z.enum(["cover", "fill", "contain"]).optional(),
       } },
-    ({ roundId, type, id, posterPath, label, isAnswer, fitMode }) =>
+    ({ roundId, groupId, type, id, posterPath, label, isAnswer, fitMode }) =>
       !canUpload ? Promise.resolve(fail("Импорт медиа недоступен вашей роли"))
         : guard(async () => {
+            if (!roundId && !groupId) throw new Error("Укажите roundId или groupId");
             const result = await addTileFromShikimori(uid, {
-              roundId, type: type as ShikimoriType, id, posterPath,
+              roundId, groupId, type: type as ShikimoriType, id, posterPath,
               label: label ?? null, isAnswer, maxPoolBytes,
             });
             if (fitMode != null) {
@@ -317,16 +342,22 @@ async function main() {
   );
   server.registerTool(
     "set_round",
-    { description: "Изменить существующий раунд (промпт/таймер/подписи/ориентацию). Пустой prompt (\"\") убирает вопрос; orientation:null снимает оверрайд. → {ok:true}",
+    { description:
+        "Изменить существующий раунд (промпт/таймер/подписи/ориентацию/режим). Пустой prompt (\"\") " +
+        "убирает вопрос; orientation:null снимает оверрайд. mode:\"groups\" переводит раунд в " +
+        "групповое сравнение — уже добавленные плитки раскладываются по блокам (по 5), " +
+        "mode:\"single\" возвращает их обычными плитками. → {ok:true, groupIds}",
       inputSchema: {
         roundId: z.string(),
+        mode: z.enum(["single", "groups"]).optional(),
         prompt: z.string().optional(),
         timerSec: z.number().optional(),
         revealSec: z.number().optional(),
         labelsMode: z.enum(["always", "finale", "never"]).optional(),
         orientation: z.enum(["landscape", "portrait"]).nullable().optional(),
       } },
-    ({ roundId, prompt, timerSec, revealSec, labelsMode, orientation }) => guard(async () => {
+    ({ roundId, mode, prompt, timerSec, revealSec, labelsMode, orientation }) => guard(async () => {
+      if (mode !== undefined) await setRoundMode(uid, roundId, mode);
       await patchRound(uid, roundId, {
         ...(prompt !== undefined ? { prompt, showPrompt: prompt.trim() !== "" } : {}),
         ...(timerSec != null ? { timerSec } : {}),
@@ -334,8 +365,43 @@ async function main() {
         ...(labelsMode != null ? { labelsMode } : {}),
         ...(orientation !== undefined ? { tileOrientation: orientation } : {}),
       });
+      return { ok: true, groupIds: await groupIdsOf(uid, roundId) };
+    }),
+  );
+  server.registerTool(
+    "add_group",
+    { description:
+        "Добавить блок в групповой раунд (максимум 3). label — название блока; без него кадр " +
+        "покажет «Блок А/Б/В». → {groupId}",
+      inputSchema: { roundId: z.string(), label: z.string().optional() } },
+    ({ roundId, label }) => guard(async () => {
+      const group = await addGroup(uid, roundId, label ?? null);
+      return { groupId: group.id };
+    }),
+  );
+  server.registerTool(
+    "set_group",
+    { description:
+        "Изменить блок: label (пустая строка убирает название) и isAnswer — блок-победитель " +
+        "(в раунде он один; ответ необязателен). → {ok:true}",
+      inputSchema: {
+        groupId: z.string(),
+        label: z.string().optional(),
+        isAnswer: z.boolean().optional(),
+      } },
+    ({ groupId, label, isAnswer }) => guard(async () => {
+      await patchGroup(uid, groupId, {
+        ...(label !== undefined ? { label } : {}),
+        ...(isAnswer !== undefined ? { isAnswer } : {}),
+      });
       return { ok: true };
     }),
+  );
+  server.registerTool(
+    "delete_group",
+    { description: "Удалить блок вместе с его карточками. → {ok:true}",
+      inputSchema: { groupId: z.string() } },
+    ({ groupId }) => guard(async () => { await deleteGroup(uid, groupId); return { ok: true }; }),
   );
   server.registerTool(
     "delete_round",

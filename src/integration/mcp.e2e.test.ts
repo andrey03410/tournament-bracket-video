@@ -190,6 +190,7 @@ describe("MCP server end-to-end (Madhouse scenario)", () => {
       "create_picker_project", "add_round", "add_tile", "add_tile_from_shikimori",
       "set_playlist", "get_project", "set_project",
       "list_pool", "list_local_media", "import_local_media",
+      "add_group", "set_group", "delete_group",
     ]) {
       expect(names).toContain(n);
     }
@@ -306,6 +307,55 @@ describe("MCP server end-to-end (Madhouse scenario)", () => {
     expect(summary.rounds[1].tiles.map((t: { label: string }) => t.label)).toEqual([
       "Лайт", "Тетрадь смерти",
     ]);
+  }, 60_000);
+
+  it("builds a group round: 3 vs 2 with a winning block", async () => {
+    const { projectId, firstRoundId } = await call("create_picker_project", {
+      title: "Тройка против двойки",
+      orientation: "portrait",
+    });
+    // switching the mode gives the round its first two blocks
+    await call("set_round", { roundId: firstRoundId, mode: "groups", prompt: "Кто сильнее?" });
+    let summary = await call("get_project", { projectId });
+    expect(summary.rounds[0].mode).toBe("groups");
+    expect(summary.rounds[0].groups).toHaveLength(2);
+
+    const [a, b] = summary.rounds[0].groups.map((g: { id: string }) => g.id);
+    await call("set_group", { groupId: a, label: "Тройка Death Note" });
+    await call("set_group", { groupId: b, label: "Двойка", isAnswer: true });
+
+    for (let i = 0; i < 3; i++) {
+      await call("add_tile_from_shikimori", {
+        groupId: a, type: "character", id: 17,
+        posterPath: "/system/characters/original/17.jpg", label: `Лайт ${i + 1}`,
+      });
+    }
+    await call("add_tile", { groupId: b, artId: summary.rounds[0].groups[0].tiles[0]?.artId ?? "" })
+      .catch(() => null); // first call may run before any art exists — ignore
+    const pool = await call("list_pool", { kind: "image", limit: 1 });
+    await call("add_tile", { groupId: b, artId: pool.arts[0].id });
+    await call("add_tile", { groupId: b, artId: pool.arts[0].id });
+
+    summary = await call("get_project", { projectId });
+    const groups = summary.rounds[0].groups;
+    expect(groups.map((g: { tiles: unknown[] }) => g.tiles.length)).toEqual([3, 2]);
+    expect(groups[0].label).toBe("Тройка Death Note");
+    expect(groups[1].isAnswer).toBe(true);
+    expect(summary.durationSec).toBeGreaterThan(0);
+
+    // limits and cleanup
+    await call("add_group", { roundId: firstRoundId });
+    await expect(call("add_group", { roundId: firstRoundId })).rejects.toThrow(/TOO_MANY_GROUPS/);
+    const third = (await call("get_project", { projectId })).rounds[0].groups[2].id;
+    await call("delete_group", { groupId: third });
+    expect((await call("get_project", { projectId })).rounds[0].groups).toHaveLength(2);
+
+    // a plain round refuses a block, a group round refuses a loose tile
+    const { roundId: plain } = await call("add_round", { projectId });
+    await expect(call("add_group", { roundId: plain })).rejects.toThrow(/NOT_GROUPS/);
+    await expect(call("add_tile", { roundId: firstRoundId, artId: pool.arts[0].id })).rejects.toThrow(
+      /NOT_SINGLE/,
+    );
   }, 60_000);
 
   it("dresses a picker up: local OST -> playlist, pool art -> background", async () => {

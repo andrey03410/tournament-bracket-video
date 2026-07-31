@@ -8,7 +8,7 @@ const fake = {
   bgArt: null,
   playlist: [{ artId: "a9", art: { label: "OST", durationSec: 164 } }],
   rounds: [
-    { id: "r1", order: 0, prompt: "Кто главный?",
+    { id: "r1", order: 0, prompt: "Кто главный?", mode: "single", groups: [],
       tiles: [
         { id: "t1", label: "Лайт", isAnswer: true, artId: "a1" },
         { id: "t2", label: "Рюук", isAnswer: false, artId: "a2" },
@@ -27,13 +27,40 @@ describe("projectSummary", () => {
       playlist: [{ artId: "a9", label: "OST", durationSec: 164 }],
       playlistSec: 164,
       rounds: [
-        { id: "r1", order: 0, prompt: "Кто главный?",
+        { id: "r1", order: 0, prompt: "Кто главный?", mode: "single", groups: [],
           tiles: [
             { id: "t1", label: "Лайт", isAnswer: true, artId: "a1" },
             { id: "t2", label: "Рюук", isAnswer: false, artId: "a2" },
           ] },
       ],
     });
+  });
+
+  it("projects the blocks of a group round with their names and the winner", () => {
+    const grouped = {
+      ...fake,
+      rounds: [
+        {
+          id: "r2", order: 0, prompt: "Кто сильнее?", mode: "groups",
+          tiles: [{ id: "c1", label: null, isAnswer: false, artId: "a1", groupId: "g1" }],
+          groups: [
+            { id: "g1", order: 0, label: "Тройка", isAnswer: false,
+              tiles: [{ id: "c1", label: "Лайт", isAnswer: false, artId: "a1" }] },
+            { id: "g2", order: 1, label: null, isAnswer: true,
+              tiles: [{ id: "c2", label: "Эл", isAnswer: false, artId: "a2" }] },
+          ],
+        },
+      ],
+    } as unknown as LoadedProject;
+    const s = projectSummary(grouped);
+    expect(s.rounds[0].mode).toBe("groups");
+    // a grouped card is not repeated as a loose tile
+    expect(s.rounds[0].tiles).toEqual([]);
+    expect(s.rounds[0].groups.map((g) => ({ label: g.label, isAnswer: g.isAnswer, n: g.tiles.length })))
+      .toEqual([
+        { label: "Тройка", isAnswer: false, n: 1 },
+        { label: null, isAnswer: true, n: 1 },
+      ]);
   });
 
   it("reports the background art and the planned runtime when given one", () => {

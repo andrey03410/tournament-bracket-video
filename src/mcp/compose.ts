@@ -1,9 +1,11 @@
 import { importPoster } from "@/server/shikimori";
-import { addTile, patchTile } from "@/server/projects";
+import { addTile, addTileToGroup, patchTile } from "@/server/projects";
 import type { ShikimoriType } from "@/lib/domain/shikimori";
 
 export interface AddTileFromShikimoriInput {
-  roundId: string;
+  /** Target: a plain round, or a block of a group round (exactly one). */
+  roundId?: string;
+  groupId?: string;
   type: ShikimoriType;
   id: number;
   posterPath: string;
@@ -24,7 +26,9 @@ export async function addTileFromShikimori(
     label: input.label ?? null,
     maxPoolBytes: input.maxPoolBytes,
   });
-  const tile = await addTile(userId, input.roundId, artId);
+  const tile = input.groupId
+    ? await addTileToGroup(userId, input.groupId, artId)
+    : await addTile(userId, input.roundId!, artId);
   if (input.label != null || input.isAnswer) {
     await patchTile(userId, tile.id, {
       ...(input.label != null ? { label: input.label } : {}),

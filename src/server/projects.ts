@@ -421,6 +421,16 @@ export async function setRoundMode(userId: string, roundId: string, mode: string
   return touch(round.projectId);
 }
 
+/** Ordered blocks of a round (ids in display order). */
+export async function listGroups(userId: string, roundId: string) {
+  const round = await prisma.pickerRound.findFirst({
+    where: { id: roundId, project: { userId } },
+    include: { groups: { orderBy: { order: "asc" } } },
+  });
+  if (!round) throw new Error("NOT_FOUND");
+  return round.groups;
+}
+
 export async function addGroup(userId: string, roundId: string, label?: string | null) {
   const round = await prisma.pickerRound.findFirst({
     where: { id: roundId, project: { userId } },

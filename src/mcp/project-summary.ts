@@ -19,9 +19,33 @@ export interface ProjectSummary {
     id: string;
     order: number;
     prompt: string | null;
-    tiles: { id: string; label: string | null; isAnswer: boolean; artId: string | null }[];
+    /** "single" = плитки, "groups" = сравнение блок к блоку. */
+    mode: string;
+    tiles: SummaryTile[];
+    /** Blocks of a group round (empty for a plain one). */
+    groups: {
+      id: string;
+      order: number;
+      label: string | null;
+      isAnswer: boolean;
+      tiles: SummaryTile[];
+    }[];
   }[];
 }
+
+interface SummaryTile {
+  id: string;
+  label: string | null;
+  isAnswer: boolean;
+  artId: string | null;
+}
+
+const summaryTile = (t: {
+  id: string;
+  label: string | null;
+  isAnswer: boolean;
+  artId: string | null;
+}): SummaryTile => ({ id: t.id, label: t.label, isAnswer: t.isAnswer, artId: t.artId });
 
 /** Compact, agent-friendly view of a project for the get_project tool. */
 export function projectSummary(
@@ -50,8 +74,14 @@ export function projectSummary(
       id: r.id,
       order: r.order,
       prompt: r.prompt,
-      tiles: r.tiles.map((t) => ({
-        id: t.id, label: t.label, isAnswer: t.isAnswer, artId: t.artId,
+      mode: r.mode,
+      tiles: r.tiles.filter((t) => !t.groupId).map(summaryTile),
+      groups: r.groups.map((g) => ({
+        id: g.id,
+        order: g.order,
+        label: g.label,
+        isAnswer: g.isAnswer,
+        tiles: g.tiles.map(summaryTile),
       })),
     })),
   };
