@@ -1,5 +1,4 @@
-import path from "node:path";
-import { IMG_EXT } from "@/lib/domain/media-ext";
+import { IMG_EXT, extOf, baseOf } from "@/lib/domain/media-ext";
 
 // Pure policy for importing media by URL: which link is a picture the pool can
 // store itself, which one belongs to the yt-dlp downloader, and which address
@@ -27,7 +26,7 @@ export function parseHttpUrl(raw: string): URL | null {
 export function classifyMediaUrl(raw: string): MediaUrlKind | null {
   const url = parseHttpUrl(raw);
   if (!url) return null;
-  const ext = path.extname(decodeSafe(url.pathname)).toLowerCase();
+  const ext = extOf(decodeSafe(url.pathname));
   return IMG_EXT.includes(ext) ? "image" : "media";
 }
 
@@ -124,8 +123,6 @@ export function urlLabel(raw: string): string | null {
   const url = parseHttpUrl(raw);
   if (!url) return null;
   const segment = decodeSafe(url.pathname).split("/").filter(Boolean).pop() ?? "";
-  const base = segment
-    ? path.basename(segment, path.extname(segment)).replace(/\s+/g, " ").trim()
-    : "";
+  const base = segment ? baseOf(segment).replace(/\s+/g, " ").trim() : "";
   return (base || url.hostname).slice(0, MAX_LABEL);
 }

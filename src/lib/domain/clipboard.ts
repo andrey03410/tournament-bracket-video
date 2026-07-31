@@ -1,4 +1,4 @@
-import path from "node:path";
+import { baseOf } from "@/lib/domain/media-ext";
 import { classifyMediaUrl, parseHttpUrl } from "@/lib/domain/media-url";
 
 // Pure reading of a paste. Binary files in the clipboard are handled by the
@@ -43,6 +43,6 @@ const GENERIC_NAMES = ["", "image", "unknown", "clipboard", "screenshot", "photo
 /** True when the clipboard handed out a placeholder name worth replacing. */
 export function isGenericPasteName(name: string): boolean {
   const trimmed = name.trim();
-  const base = path.basename(trimmed, path.extname(trimmed)).trim().toLowerCase();
+  const base = baseOf(trimmed).trim().toLowerCase();
   return GENERIC_NAMES.includes(base);
 }
