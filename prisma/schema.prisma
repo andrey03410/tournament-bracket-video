@@ -318,6 +318,9 @@ model RenderJob {
   status         String   @default("queued") // "queued" | "running" | "done" | "failed"
   progress       Float    @default(0)
   outputPath     String?
+  // Size of the finished MP4; the cabinet sums these instead of stat()-ing every
+  // file on each page load. null = never measured (lazily backfilled).
+  outputBytes    Float?
   error          String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt

@@ -17,8 +17,9 @@ async function fileSize(relative: string): Promise<number> {
 }
 
 /**
- * Backfill sizeBytes for rows created before phase 5 (best-effort, persisted
- * so the stat() cost is paid once per row).
+ * Backfill sizeBytes for rows created before phase 5 — and, since phase 17,
+ * outputBytes for renders finished before it (best-effort, persisted so the
+ * stat() cost is paid once per row instead of on every cabinet visit).
  */
 async function backfillSizes(userId: string): Promise<void> {
   const tracks = await prisma.track.findMany({
@@ -41,42 +42,46 @@ async function backfillSizes(userId: string): Promise<void> {
       data: { sizeBytes: await fileSize(a.filePath) },
     });
   }
+  const jobs = await prisma.renderJob.findMany({
+    where: {
+      outputBytes: null,
+      outputPath: { not: null },
+      OR: [{ tournament: { userId } }, { project: { userId } }],
+    },
+    select: { id: true, outputPath: true },
+  });
+  for (const j of jobs) {
+    await prisma.renderJob.update({
+      where: { id: j.id },
+      data: { outputBytes: await fileSize(j.outputPath as string) },
+    });
+  }
+}
+
+interface KindTotals {
+  count: number;
+  bytes: number;
 }
 
 export interface UsageSummary {
   role: string;
   quotas: ReturnType<typeof quotasFor>;
-  tournaments: {
-    id: string;
-    title: string;
-    status: string;
-    trackCount: number;
-    sizeBytes: number;
-    createdAt: Date;
-  }[];
-  arts: {
-    id: string;
-    label: string | null;
-    kind: string;
-    sizeBytes: number;
-    usageCount: number;
-    createdAt: Date;
-  }[];
-  renders: {
-    id: string;
-    tournamentId: string;
-    tournamentTitle: string;
-    status: string;
-    sizeBytes: number;
-    hasOutput: boolean;
-    createdAt: Date;
-  }[];
+  /** Pool totals with a per-kind split (images/videos/audio). */
+  pool: KindTotals & { byKind: Record<"image" | "video" | "audio", KindTotals> };
+  archives: KindTotals;
+  renders: KindTotals & { ready: number };
+  /** Legacy aliases the quota lines are drawn from. */
   archiveBytes: number;
   poolBytes: number;
   renderBytes: number;
+  tournamentCount: number;
 }
 
-/** Everything the personal cabinet shows: per-entity sizes + totals + quotas. */
+/**
+ * What the personal cabinet shows above the lists: quotas and totals, computed
+ * with aggregates only. The lists themselves are loaded on demand (a pool of a
+ * thousand posters must not be part of this response).
+ */
 export async function usageSummary(userId: string): Promise<UsageSummary> {
   await backfillSizes(userId);
 
@@ -84,64 +89,145 @@ export async function usageSummary(userId: string): Promise<UsageSummary> {
     where: { id: userId },
     select: { role: true },
   });
-  const tournaments = await prisma.tournament.findMany({
-    where: { userId },
-    orderBy: { updatedAt: "desc" },
-    include: { tracks: { select: { sizeBytes: true } } },
-  });
-  const arts = await prisma.art.findMany({
-    where: { userId },
-    orderBy: { createdAt: "desc" },
-    include: { _count: { select: { renderItems: true } } },
-  });
-  const jobs = await prisma.renderJob.findMany({
-    where: { OR: [{ tournament: { userId } }, { project: { userId } }] },
-    orderBy: { createdAt: "desc" },
-    include: {
-      tournament: { select: { id: true, title: true } },
-      project: { select: { id: true, title: true } },
-    },
-  });
 
-  const tournamentRows = tournaments.map((t) => ({
-    id: t.id,
-    title: t.title,
-    status: t.status,
-    trackCount: t.tracks.length,
-    sizeBytes: t.tracks.reduce((s, tr) => s + (tr.sizeBytes ?? 0), 0),
-    createdAt: t.createdAt,
-  }));
-  const artRows = arts.map((a) => ({
-    id: a.id,
-    label: a.label,
-    kind: a.kind,
-    sizeBytes: a.sizeBytes ?? 0,
-    usageCount: a._count.renderItems,
-    createdAt: a.createdAt,
-  }));
-  const renderRows = [];
-  for (const j of jobs) {
-    renderRows.push({
-      id: j.id,
-      tournamentId: j.tournament?.id ?? j.project?.id ?? "",
-      tournamentTitle: j.tournament?.title ?? j.project?.title ?? "—",
-      status: j.status,
-      sizeBytes: j.outputPath ? await fileSize(j.outputPath) : 0,
-      hasOutput: Boolean(j.outputPath),
-      createdAt: j.createdAt,
-    });
+  const poolByKind = await prisma.art.groupBy({
+    by: ["kind"],
+    where: { userId },
+    _count: { _all: true },
+    _sum: { sizeBytes: true },
+  });
+  const empty = (): KindTotals => ({ count: 0, bytes: 0 });
+  const byKind: Record<"image" | "video" | "audio", KindTotals> = {
+    image: empty(),
+    video: empty(),
+    audio: empty(),
+  };
+  for (const row of poolByKind) {
+    const kind = row.kind as "image" | "video" | "audio";
+    if (!byKind[kind]) continue;
+    byKind[kind] = { count: row._count._all, bytes: row._sum.sizeBytes ?? 0 };
   }
+  const pool = {
+    count: Object.values(byKind).reduce((n, k) => n + k.count, 0),
+    bytes: Object.values(byKind).reduce((n, k) => n + k.bytes, 0),
+    byKind,
+  };
+
+  const [tournamentCount, trackAgg] = await Promise.all([
+    prisma.tournament.count({ where: { userId } }),
+    prisma.track.aggregate({
+      where: { tournament: { userId } },
+      _sum: { sizeBytes: true },
+    }),
+  ]);
+  const archives: KindTotals = {
+    count: tournamentCount,
+    bytes: trackAgg._sum.sizeBytes ?? 0,
+  };
+
+  const ownJobs = { OR: [{ tournament: { userId } }, { project: { userId } }] };
+  const [renderCount, readyCount, renderAgg] = await Promise.all([
+    prisma.renderJob.count({ where: ownJobs }),
+    prisma.renderJob.count({ where: { ...ownJobs, outputPath: { not: null } } }),
+    prisma.renderJob.aggregate({ where: ownJobs, _sum: { outputBytes: true } }),
+  ]);
+  const renders = {
+    count: renderCount,
+    ready: readyCount,
+    bytes: renderAgg._sum.outputBytes ?? 0,
+  };
 
   return {
     role: user.role,
     quotas: quotasFor(user.role),
-    tournaments: tournamentRows,
-    arts: artRows,
-    renders: renderRows,
-    archiveBytes: tournamentRows.reduce((s, t) => s + t.sizeBytes, 0),
-    poolBytes: artRows.reduce((s, a) => s + a.sizeBytes, 0),
-    renderBytes: renderRows.reduce((s, r) => s + r.sizeBytes, 0),
+    pool,
+    archives,
+    renders,
+    archiveBytes: archives.bytes,
+    poolBytes: pool.bytes,
+    renderBytes: renders.bytes,
+    tournamentCount,
   };
+}
+
+export interface ArchiveRow {
+  id: string;
+  title: string;
+  status: string;
+  trackCount: number;
+  sizeBytes: number;
+  createdAt: Date;
+}
+
+/** Archives for the cabinet list. Few by design (quotas cap them), so no paging. */
+export async function listArchiveRows(userId: string): Promise<ArchiveRow[]> {
+  const rows = await prisma.tournament.findMany({
+    where: { userId },
+    orderBy: { updatedAt: "desc" },
+    include: {
+      _count: { select: { tracks: true } },
+      tracks: { select: { sizeBytes: true } },
+    },
+  });
+  return rows.map((t) => ({
+    id: t.id,
+    title: t.title,
+    status: t.status,
+    trackCount: t._count.tracks,
+    sizeBytes: t.tracks.reduce((sum, tr) => sum + (tr.sizeBytes ?? 0), 0),
+    createdAt: t.createdAt,
+  }));
+}
+
+export interface RenderRow {
+  id: string;
+  ownerId: string;
+  title: string;
+  status: string;
+  sizeBytes: number;
+  hasOutput: boolean;
+  createdAt: Date;
+}
+
+const RENDER_PAGE = 20;
+
+/** Renders for the cabinet list, newest first, cursor-paged. */
+export async function listRenderRows(
+  userId: string,
+  opts: { cursor?: string; limit?: number } = {},
+): Promise<{ rows: RenderRow[]; nextCursor: string | null }> {
+  const limit = Math.min(Math.max(1, opts.limit ?? RENDER_PAGE), 100);
+  const jobs = await prisma.renderJob.findMany({
+    where: { OR: [{ tournament: { userId } }, { project: { userId } }] },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    include: {
+      tournament: { select: { id: true, title: true } },
+      project: { select: { id: true, title: true } },
+    },
+    take: limit + 1,
+    ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
+  });
+
+  const page = jobs.slice(0, limit);
+  const rows: RenderRow[] = [];
+  for (const j of page) {
+    let bytes = j.outputBytes;
+    if (bytes === null && j.outputPath) {
+      // finished before phase 17: measure once and remember
+      bytes = await fileSize(j.outputPath);
+      await prisma.renderJob.update({ where: { id: j.id }, data: { outputBytes: bytes } });
+    }
+    rows.push({
+      id: j.id,
+      ownerId: j.tournament?.id ?? j.project?.id ?? "",
+      title: j.tournament?.title ?? j.project?.title ?? "—",
+      status: j.status,
+      sizeBytes: bytes ?? 0,
+      hasOutput: Boolean(j.outputPath),
+      createdAt: j.createdAt,
+    });
+  }
+  return { rows, nextCursor: jobs.length > limit ? page[page.length - 1].id : null };
 }
 
 /** Delete a finished render job the user owns, including its MP4. */

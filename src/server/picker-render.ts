@@ -1,7 +1,7 @@
 import "server-only";
 import path from "node:path";
 import { existsSync } from "node:fs";
-import { mkdir, copyFile } from "node:fs/promises";
+import { mkdir, copyFile, stat } from "node:fs/promises";
 import { prisma } from "@/lib/db";
 import { absPath, renderOutputPath } from "@/lib/storage";
 import { clipAudio, clipVideo, writeTick } from "@/lib/audio";
@@ -459,8 +459,9 @@ async function runPickerRender(jobId: string): Promise<void> {
     },
   });
 
+  const { size } = await stat(outputLocation);
   await prisma.renderJob.update({
     where: { id: jobId },
-    data: { status: "done", progress: 1, outputPath: outputRel },
+    data: { status: "done", progress: 1, outputPath: outputRel, outputBytes: size },
   });
 }

@@ -1,6 +1,6 @@
 import "server-only";
 import path from "node:path";
-import { mkdir, copyFile } from "node:fs/promises";
+import { mkdir, copyFile, stat } from "node:fs/promises";
 import { prisma } from "@/lib/db";
 import { absPath, renderOutputPath, STORAGE_ROOT } from "@/lib/storage";
 import {
@@ -522,9 +522,10 @@ async function runRender(jobId: string): Promise<void> {
     },
   });
 
+  const { size } = await stat(outputLocation);
   await prisma.renderJob.update({
     where: { id: jobId },
-    data: { status: "done", progress: 1, outputPath: outputRel },
+    data: { status: "done", progress: 1, outputPath: outputRel, outputBytes: size },
   });
 }
 

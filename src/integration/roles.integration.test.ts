@@ -8,6 +8,7 @@ import { createArt, poolUsageBytes } from "@/server/arts";
 import { ensureAdminRole } from "@/server/roles";
 import {
   usageSummary,
+  listArchiveRows,
   deleteRenderJob,
   listUsers,
   setUserRole,
@@ -222,11 +223,16 @@ describe("cabinet usage summary", () => {
     const s = await usageSummary(userId);
     expect(s.role).toBe("user");
     expect(s.quotas.maxTournaments).toBe(1);
-    expect(s.tournaments).toHaveLength(1);
-    expect(s.tournaments[0].trackCount).toBe(3);
-    expect(s.tournaments[0].sizeBytes).toBe(250); // 100 + 100 + backfilled 50
+    // phase 17: the summary carries aggregates, the rows come from listArchiveRows
+    expect(s.archives).toEqual({ count: 1, bytes: 250 }); // 100 + 100 + backfilled 50
     expect(s.archiveBytes).toBe(250);
     expect(s.poolBytes).toBe(PNG.length);
+    expect(s.pool.byKind.image).toEqual({ count: 1, bytes: PNG.length });
+
+    const archives = await listArchiveRows(userId);
+    expect(archives).toHaveLength(1);
+    expect(archives[0].trackCount).toBe(3);
+    expect(archives[0].sizeBytes).toBe(250);
 
     const backfilled = await prisma.track.findUniqueOrThrow({ where: { id: legacy.id } });
     expect(backfilled.sizeBytes).toBe(50);
