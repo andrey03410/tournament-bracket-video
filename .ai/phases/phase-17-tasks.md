@@ -28,7 +28,7 @@
 
 ## Задачи
 
-- [ ] **Task 1: Домен ссылок и буфера.** `lib/domain/media-url.ts`
+- [x] **Task 1: Домен ссылок и буфера.** `lib/domain/media-url.ts`
   (`classifyMediaUrl`, `imageExtFromContentType`, `isBlockedHostname`,
   `isBlockedAddress`, `urlLabel`) и `lib/domain/clipboard.ts`
   (`pickPastedImageUrl`, `pasteLabel`, `isGenericPasteName`) + юнит-тесты.
