@@ -32,7 +32,7 @@
   (`classifyMediaUrl`, `imageExtFromContentType`, `isBlockedHostname`,
   `isBlockedAddress`, `urlLabel`) и `lib/domain/clipboard.ts`
   (`pickPastedImageUrl`, `pasteLabel`, `isGenericPasteName`) + юнит-тесты.
-- [ ] **Task 2: Импорт картинки по ссылке.** `server/media-url.ts`
+- [x] **Task 2: Импорт картинки по ссылке.** `server/media-url.ts`
   (`importImageFromUrl`: потоковое скачивание с обрывом по лимиту, проверка
   редиректов, `createArtFromFile`), роут `POST /api/arts/from-url` с правами и
   квотой; интеграционные тесты против локального HTTP-сервера + HTTP E2E.

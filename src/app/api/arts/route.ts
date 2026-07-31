@@ -1,35 +1,12 @@
 import { NextResponse } from "next/server";
 import { userOr401, permissionOr403, badRequest, tooLarge } from "@/lib/api";
 import { formatBytes, quotasFor } from "@/lib/domain/permissions";
-import { listArts, listRecentArts, createArt, type ArtRow } from "@/server/arts";
+import { artDto as serialize } from "@/lib/art-dto";
+import { listArts, listRecentArts, createArt } from "@/server/arts";
 
 // Pool uploads are single media files; keep a sane ceiling well under the
 // tournament-archive limit. Roles with a pool quota get the tighter of the two.
 const MAX_UPLOAD_BYTES = 512 * 1024 * 1024; // 512 MB
-
-function serialize(a: {
-  id: string;
-  label: string | null;
-  kind: string;
-  durationSec?: number | null;
-  hasAudio?: boolean;
-  posterPath?: string | null;
-  usageCount?: number;
-  lastUsedAt?: Date | null;
-}) {
-  return {
-    id: a.id,
-    label: a.label,
-    kind: a.kind,
-    url: `/api/arts/${a.id}`,
-    posterUrl:
-      a.kind === "video" && a.posterPath ? `/api/arts/${a.id}?poster=1` : null,
-    durationSec: a.durationSec ?? null,
-    hasAudio: a.hasAudio ?? false,
-    usageCount: a.usageCount ?? 0,
-    lastUsedAt: a.lastUsedAt ?? null,
-  };
-}
 
 export async function GET(req: Request) {
   const auth = await userOr401();
