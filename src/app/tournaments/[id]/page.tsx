@@ -20,7 +20,7 @@ export default async function TournamentOverview({
   const t = await getTournament(session.user.id, params.id);
   if (!t) notFound();
 
-  const { progress, isComplete } = nextComparison(t);
+  const { screens, coverage, isComplete, groupSize } = nextComparison(t);
   const titleById = new Map(t.tracks.map((tr) => [tr.id, tr]));
 
   // Build ranking rows for display when complete. For a finalized tournament use
@@ -44,8 +44,8 @@ export default async function TournamentOverview({
     });
   }
 
-  const pct = progress.estimatedTotal
-    ? Math.min(100, Math.round((progress.completed / progress.estimatedTotal) * 100))
+  const pct = screens.estimatedTotal
+    ? Math.min(100, Math.round((screens.completed / screens.estimatedTotal) * 100))
     : 0;
 
   return (
@@ -67,7 +67,9 @@ export default async function TournamentOverview({
             <div style={{ width: `${pct}%` }} />
           </div>
           <p className="muted" style={{ marginTop: 10 }}>
-            Сделано ~{progress.completed} из ~{progress.estimatedTotal} сравнений.
+            Сделано {screens.completed} из ~{screens.estimatedTotal} экранов
+            {groupSize > 2 ? ` (по ${groupSize} трека за раз)` : ""} · расставлено{" "}
+            {coverage.orderedPct}% пар.
           </p>
           <a className="btn" href={`/tournaments/${t.id}/compare`}>
             Продолжить сравнения →

@@ -1,17 +1,29 @@
 import { NextResponse } from "next/server";
 import { userOr401, notFound, badRequest } from "@/lib/api";
-import { isComparisonResult } from "@/lib/domain/types";
-import { getTournament, recordComparison, nextComparison } from "@/server/tournaments";
+import { getTournament, recordGroupAnswer, nextComparison } from "@/server/tournaments";
 
+const MESSAGES: Record<string, string> = {
+  GROUP_MISMATCH: "Экран устарел — обновите страницу и ответьте заново",
+  NOTHING_TO_ANSWER: "Сравнивать больше нечего",
+  INVALID_PAIR: "Некорректные данные сравнения",
+};
+
+const isIdList = (v: unknown): v is string[] =>
+  Array.isArray(v) && v.every((x) => typeof x === "string");
+
+/**
+ * One comparison screen. `ranked` is best-first; `rest` holds the tracks the
+ * user declined to separate. A pair screen is just the two-track case, so the
+ * classic "left / draw / right" answer travels the same route.
+ */
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   const auth = await userOr401();
   if ("response" in auth) return auth.response;
 
   const body = await req.json().catch(() => null);
-  const aId = body?.a;
-  const bId = body?.b;
-  const result = body?.result;
-  if (typeof aId !== "string" || typeof bId !== "string" || !isComparisonResult(result)) {
+  const ranked = body?.ranked;
+  const rest = body?.rest ?? [];
+  if (!isIdList(ranked) || !isIdList(rest) || ranked.length + rest.length < 2) {
     return badRequest("Некорректные данные сравнения");
   }
 
@@ -19,13 +31,17 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (!t) return notFound();
 
   try {
-    await recordComparison(t, aId, bId, result);
+    await recordGroupAnswer(t, ranked, rest);
   } catch (e) {
-    return badRequest(String((e as Error).message));
+    const code = String((e as Error).message);
+    return badRequest(MESSAGES[code] ?? code);
   }
 
-  // reload to compute the next step
   const updated = await getTournament(auth.userId, params.id);
   const next = updated ? nextComparison(updated) : null;
-  return NextResponse.json({ ok: true, isComplete: next?.isComplete ?? false });
+  return NextResponse.json({
+    ok: true,
+    isComplete: next?.isComplete ?? false,
+    canExtend: next?.canExtend ?? false,
+  });
 }

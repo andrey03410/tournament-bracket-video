@@ -701,3 +701,67 @@ audio {
 .shk-thumb { width: 40px; height: 56px; object-fit: cover; border-radius: 4px; flex: 0 0 auto; }
 .shk-thumb-empty { display: flex; align-items: center; justify-content: center; background: #222; }
 .shk-result { padding: 4px 0; }
+
+/* Phase 18: ranking a group of tracks on one screen. */
+.group-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+.group-card {
+  position: relative;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+  text-align: center;
+}
+.group-card.picked {
+  border-color: #d4af37;
+  box-shadow: 0 0 0 1px #d4af37 inset;
+}
+.group-card .name {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 10px;
+  min-height: 22px;
+}
+.group-card audio,
+.group-card video {
+  width: 100%;
+}
+.group-card video {
+  max-height: 160px;
+  background: #000;
+  border-radius: 8px;
+}
+.place-badge {
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: #d4af37;
+  color: #1a1a1a;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rank-pick {
+  margin-top: 12px;
+  width: 100%;
+}
+.compare-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.coverage {
+  font-size: 13px;
+  color: var(--muted);
+}

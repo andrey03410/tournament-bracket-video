@@ -5,12 +5,22 @@ import { saveFile, trackPath, removePath } from "@/lib/storage";
 import { createEngine } from "@/lib/domain/engines";
 import type { Comparison, ComparisonResult, Scheme } from "@/lib/domain/types";
 import { isComparisonResult } from "@/lib/domain/types";
+import { lookup } from "@/lib/domain/comparisons";
+import {
+  clampGroupSize,
+  decodeGroupAnswer,
+  plannedScreens,
+  validateGroupAnswer,
+} from "@/lib/domain/group-answer";
+import { orderCoverage } from "@/lib/domain/order-coverage";
 import type { ExtractedTrack } from "@/lib/upload";
 
 export interface CreateInput {
   title: string;
   scheme: Scheme;
   blindMode: boolean;
+  /** How many tracks one screen ranks; clamped to the engine and the field. */
+  groupSize?: number;
 }
 
 export async function createTournament(
@@ -35,6 +45,10 @@ export async function createTournament(
         title: input.title,
         scheme: input.scheme,
         blindMode: input.blindMode,
+        groupSize: Math.min(
+          clampGroupSize(input.groupSize ?? 2, tracks.length),
+          createEngine(input.scheme).maxGroupSize,
+        ),
         status: "in_progress",
       },
     });
@@ -76,7 +90,12 @@ export async function getTournament(userId: string, id: string) {
     where: { id, userId },
     include: {
       tracks: { orderBy: { order: "asc" } },
-      comparisons: { orderBy: { createdAt: "asc" } },
+      // Id breaks the tie: SQLite timestamps are milliseconds, and two screens
+      // answered inside the same millisecond would otherwise come back in an
+      // arbitrary order — which decides both "first answer wins" in `lookup`
+      // and which screen undo removes.
+      comparisons: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
+      batches: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
       rankings: { orderBy: { rank: "asc" } },
     },
   });
@@ -97,12 +116,31 @@ export function toDomainComparisons(
 
 type LoadedTournament = NonNullable<Awaited<ReturnType<typeof getTournament>>>;
 
+/** Group size actually in force: the stored one, capped by the engine and field. */
+export function effectiveGroupSize(t: LoadedTournament): number {
+  const engine = createEngine(t.scheme as Scheme);
+  return Math.min(clampGroupSize(t.groupSize, t.tracks.length), engine.maxGroupSize);
+}
+
 export function nextComparison(t: LoadedTournament) {
   const items = t.tracks.map((tr) => tr.id);
   const log = toDomainComparisons(t.comparisons);
   const engine = createEngine(t.scheme as Scheme);
-  const pair = engine.nextPair(items, log);
-  const progress = engine.progress(items, log);
+  const groupSize = effectiveGroupSize(t);
+  const bonus = t.bonusOpponents;
+
+  // A finalized tournament must not reopen for more questions — its ranking is
+  // persisted and may have been reordered by hand since.
+  const question =
+    t.status === "completed" ? null : engine.nextQuestion(items, log, groupSize, bonus);
+  const progress = engine.progress(items, log, groupSize);
+
+  // Buying another round only makes sense while the engine still has something
+  // left to ask; round-robin and merge simply end when they are done.
+  const canExtend =
+    t.status !== "completed" &&
+    question === null &&
+    engine.nextQuestion(items, log, groupSize, bonus + (groupSize - 1)) !== null;
 
   // Provisional standings (null for schemes without a meaningful interim ranking).
   const partial = engine.partialRanking(items, log);
@@ -114,7 +152,136 @@ export function nextComparison(t: LoadedTournament) {
       })
     : null;
 
-  return { pair, progress, isComplete: pair === null, standings };
+  // Screens, not comparisons: with a changeable group size the comparison count
+  // is not something the user can feel, and the bar would jump when k changes.
+  const legacyScreens = t.comparisons.filter((c) => c.batchId === null).length;
+  const screens = {
+    completed: t.batches.length + legacyScreens,
+    estimatedTotal: Math.max(
+      t.batches.length + legacyScreens,
+      plannedScreens(t.scheme as Scheme, items.length, groupSize),
+    ),
+  };
+
+  return {
+    question,
+    groupSize,
+    maxGroupSize: engine.maxGroupSize,
+    progress,
+    screens,
+    coverage: orderCoverage(items, log),
+    canExtend,
+    isComplete: question === null,
+    standings,
+  };
+}
+
+/**
+ * Record one screen. The answer must be to the group the engine is actually
+ * asking — a stale screen is refused rather than folded in, so the log can never
+ * disagree with the schedule that produced it. Pairs already in the log are
+ * skipped: `lookup` honours the first answer, so writing a second row would
+ * silently inflate the score without changing the order.
+ */
+export async function recordGroupAnswer(
+  t: LoadedTournament,
+  ranked: string[],
+  rest: string[],
+) {
+  const step = nextComparison(t);
+  if (!step.question) throw new Error("NOTHING_TO_ANSWER");
+
+  const invalid = validateGroupAnswer(step.question, ranked, rest);
+  if (invalid) throw new Error(invalid);
+
+  const known = new Set(t.tracks.map((tr) => tr.id));
+  for (const id of [...ranked, ...rest]) if (!known.has(id)) throw new Error("INVALID_PAIR");
+
+  const log = toDomainComparisons(t.comparisons);
+  const pairs = decodeGroupAnswer(ranked, rest).filter(
+    (p) => lookup(log, p.a, p.b) === undefined,
+  );
+
+  await prisma.$transaction(async (tx) => {
+    const batch = await tx.comparisonBatch.create({
+      data: {
+        tournamentId: t.id,
+        size: ranked.length + rest.length,
+        itemIds: JSON.stringify([...ranked, ...rest]),
+      },
+    });
+    for (const p of pairs) {
+      await tx.comparison.create({
+        data: {
+          tournamentId: t.id,
+          trackAId: p.a,
+          trackBId: p.b,
+          result: p.result,
+          batchId: batch.id,
+        },
+      });
+    }
+    await tx.tournament.update({ where: { id: t.id }, data: { updatedAt: new Date() } });
+  });
+
+  return { written: pairs.length };
+}
+
+/** Undo the last screen: a whole batch, or a single pre-phase-18 comparison. */
+export async function undoLastAnswer(t: LoadedTournament) {
+  if (t.status === "completed") throw new Error("ALREADY_FINALIZED");
+
+  const lastBatch = t.batches.at(-1) ?? null;
+  const legacy = t.comparisons.filter((c) => c.batchId === null);
+  const lastLegacy = legacy.at(-1) ?? null;
+
+  // Ties go to the batch: batches only exist since phase 18, so a batch stamped
+  // at the same millisecond as a loose row is the newer of the two.
+  const useBatch =
+    lastBatch !== null &&
+    (lastLegacy === null || lastBatch.createdAt >= lastLegacy.createdAt);
+
+  if (useBatch) {
+    const removed = t.comparisons.filter((c) => c.batchId === lastBatch!.id).length;
+    await prisma.comparisonBatch.delete({ where: { id: lastBatch!.id } });
+    return { removed };
+  }
+  if (lastLegacy) {
+    await prisma.comparison.delete({ where: { id: lastLegacy.id } });
+    return { removed: 1 };
+  }
+  throw new Error("NOTHING_TO_UNDO");
+}
+
+/** Change how many tracks one screen ranks. Takes effect on the next question. */
+export async function setGroupSize(userId: string, tournamentId: string, size: number) {
+  const t = await prisma.tournament.findFirst({
+    where: { id: tournamentId, userId },
+    include: { _count: { select: { tracks: true } } },
+  });
+  if (!t) throw new Error("NOT_FOUND");
+  const engine = createEngine(t.scheme as Scheme);
+  const groupSize = Math.min(
+    clampGroupSize(size, t._count.tracks),
+    engine.maxGroupSize,
+  );
+  await prisma.tournament.update({ where: { id: tournamentId }, data: { groupSize } });
+  return groupSize;
+}
+
+/** Buy one more round: every track gets a group's worth of extra opponents. */
+export async function extendPlan(t: LoadedTournament) {
+  const items = t.tracks.map((tr) => tr.id);
+  const log = toDomainComparisons(t.comparisons);
+  const engine = createEngine(t.scheme as Scheme);
+  const groupSize = effectiveGroupSize(t);
+  const bonusOpponents = t.bonusOpponents + (groupSize - 1);
+
+  if (engine.nextQuestion(items, log, groupSize, bonusOpponents) === null) {
+    throw new Error("NOTHING_MORE_TO_ASK");
+  }
+  await prisma.tournament.update({ where: { id: t.id }, data: { bonusOpponents } });
+  return bonusOpponents;
 }
 
 export async function recordComparison(
@@ -145,7 +312,13 @@ export async function finalize(t: LoadedTournament, topSize: number) {
   const items = t.tracks.map((tr) => tr.id);
   const log = toDomainComparisons(t.comparisons);
   const engine = createEngine(t.scheme as Scheme);
-  if (!engine.isComplete(items, log)) throw new Error("NOT_COMPLETE");
+  // An already finalized tournament stays finalized: phase 18 changed how Swiss
+  // decides it is done (opponents per track instead of rounds), and a run that
+  // finished under the old rule can be a comparison short under the new one.
+  // Re-opening it would block a plain top-N change on a finished top.
+  if (t.status !== "completed" && !engine.isComplete(items, log, t.bonusOpponents)) {
+    throw new Error("NOT_COMPLETE");
+  }
 
   const clampedTop = Math.max(1, Math.min(topSize, items.length));
 

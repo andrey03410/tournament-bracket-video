@@ -31,6 +31,7 @@ export async function POST(req: Request) {
   const title = String(form.get("title") ?? "").trim();
   const scheme = String(form.get("scheme") ?? "");
   const blindMode = String(form.get("blindMode") ?? "") === "on";
+  const groupSize = Number(form.get("groupSize") ?? 2);
   const file = form.get("file");
 
   if (!title) return badRequest("Укажите название");
@@ -52,7 +53,7 @@ export async function POST(req: Request) {
   try {
     const tournament = await createTournament(
       auth.userId,
-      { title, scheme, blindMode },
+      { title, scheme, blindMode, groupSize },
       tracks,
       { maxTournaments: quotasFor(auth.user.role).maxTournaments },
     );

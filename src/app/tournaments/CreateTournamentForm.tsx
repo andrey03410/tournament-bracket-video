@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { MAX_GROUP_SIZE, plannedScreens } from "@/lib/domain/group-answer";
+import { createEngine } from "@/lib/domain/engines";
+import type { Scheme } from "@/lib/domain/types";
 
 export interface CreateFormLimits {
   /** Human-readable archive size cap, e.g. "100 МБ". */
@@ -14,7 +17,18 @@ export function CreateTournamentForm({ limits }: { limits: CreateFormLimits }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [scheme, setScheme] = useState<Scheme>("merge");
+  const [groupSize, setGroupSize] = useState(3);
   const slotFull = limits.slotsLeft !== null && limits.slotsLeft <= 0;
+
+  // The archive is not parsed yet, so the exact screen count is unknown here —
+  // two reference field sizes make the trade-off concrete, and the real number
+  // shows on the first comparison screen.
+  const groupsAllowed = createEngine(scheme).maxGroupSize > 2;
+  const effectiveSize = groupsAllowed ? groupSize : 2;
+  const estimate = [30, 200]
+    .map((n) => `${n} треков — ~${plannedScreens(scheme, n, effectiveSize)} экранов`)
+    .join(", ");
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -53,11 +67,44 @@ export function CreateTournamentForm({ limits }: { limits: CreateFormLimits }) {
       <input name="title" placeholder="Лучшие OST 2024" required />
 
       <label>Схема турнира</label>
-      <select name="scheme" defaultValue="merge">
+      <select
+        name="scheme"
+        value={scheme}
+        onChange={(e) => setScheme(e.target.value as Scheme)}
+      >
         <option value="merge">Сравнительная сортировка (минимум сравнений)</option>
         <option value="swiss">Швейцарка (быстрее, приблизительно)</option>
         <option value="round_robin">Круговая (все пары, точнее всего)</option>
       </select>
+
+      <label>Сравнивать за раз</label>
+      <select
+        name="groupSize"
+        value={effectiveSize}
+        disabled={!groupsAllowed}
+        onChange={(e) => setGroupSize(Number(e.target.value))}
+      >
+        {Array.from({ length: MAX_GROUP_SIZE - 1 }, (_, i) => i + 2).map((n) => (
+          <option key={n} value={n}>
+            {n === 2 ? "2 — пара, «что лучше»" : `${n} — расставить по местам`}
+          </option>
+        ))}
+      </select>
+      <p className="muted" style={{ fontSize: 13, marginTop: -6 }}>
+        {groupsAllowed ? (
+          <>
+            Ранжирование группы даёт больше информации за одно прослушивание:{" "}
+            {estimate}. Размер можно менять по ходу турнира. Больше пяти треков за раз
+            удержать в голове тяжело.
+          </>
+        ) : (
+          <>
+            Сравнительная сортировка спрашивает только парами — она и так работает на
+            минимуме сравнений, и группы ей ничего не дают. Для групп выберите швейцарку
+            или круговую.
+          </>
+        )}
+      </p>
 
       <label className="row" style={{ gap: 8, marginTop: 14 }}>
         <input type="checkbox" name="blindMode" />

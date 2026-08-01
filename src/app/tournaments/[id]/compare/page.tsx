@@ -20,14 +20,20 @@ interface Standing {
 interface NextResponse {
   blindMode: boolean;
   isComplete: boolean;
+  canExtend: boolean;
+  groupSize: number;
+  maxGroupSize: number;
   progress: { completed: number; estimatedTotal: number };
+  screens: { completed: number; estimatedTotal: number };
+  coverage: { pairs: number; ordered: number; orderedPct: number; contradictory: number };
   standings: Standing[] | null;
-  pair: { a: TrackDto; b: TrackDto } | null;
+  question: TrackDto[] | null;
 }
 
 export default function ComparePage({ params }: { params: { id: string } }) {
   const router = useRouter();
   const [data, setData] = useState<NextResponse | null>(null);
+  const [picks, setPicks] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [reveal, setReveal] = useState(false);
   const [showTop, setShowTop] = useState(false);
@@ -41,33 +47,78 @@ export default function ComparePage({ params }: { params: { id: string } }) {
       return;
     }
     const json: NextResponse = await res.json();
-    if (json.isComplete) {
-      router.push(`/tournaments/${params.id}`);
-      return;
-    }
     setReveal(false);
+    setPicks([]);
     setData(json);
-  }, [params.id, router]);
+  }, [params.id]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  async function submit(result: "a" | "b" | "draw") {
-    if (!data?.pair || busy) return;
-    setBusy(true);
-    try {
-      const res = await fetch(`/api/tournaments/${params.id}/compare`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ a: data.pair.a.id, b: data.pair.b.id, result }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Ошибка");
-      if (json.isComplete) {
-        router.push(`/tournaments/${params.id}`);
+  const submit = useCallback(
+    async (ranked: string[], rest: string[]) => {
+      if (busy) return;
+      setBusy(true);
+      try {
+        const res = await fetch(`/api/tournaments/${params.id}/compare`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ranked, rest }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Ошибка");
+        await load();
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, load, params.id],
+  );
+
+  /** Click n-th: that track takes the next free place; the last one is implied. */
+  const pick = useCallback(
+    (id: string) => {
+      const question = data?.question;
+      if (!question || busy || picks.includes(id)) return;
+      const next = [...picks, id];
+      if (next.length === question.length - 1) {
+        const last = question.find((t) => !next.includes(t.id))!;
+        void submit([...next, last.id], []);
         return;
       }
+      setPicks(next);
+    },
+    [busy, data?.question, picks, submit],
+  );
+
+  // Number keys rank without aiming the mouse — the point is to be quick.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const question = data?.question;
+      if (!question) return;
+      const target = e.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      const n = Number(e.key);
+      if (Number.isInteger(n) && n >= 1 && n <= question.length) pick(question[n - 1].id);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [data?.question, pick]);
+
+  async function act(path: string, body?: unknown) {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/tournaments/${params.id}${path}`, {
+        method: body === undefined ? "POST" : "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error ?? "Ошибка");
       await load();
     } catch (err) {
       setError((err as Error).message);
@@ -76,7 +127,7 @@ export default function ComparePage({ params }: { params: { id: string } }) {
     }
   }
 
-  if (error) {
+  if (error && !data) {
     return (
       <div className="container">
         <div className="panel">
@@ -88,7 +139,7 @@ export default function ComparePage({ params }: { params: { id: string } }) {
       </div>
     );
   }
-  if (!data?.pair) {
+  if (!data) {
     return (
       <div className="container">
         <p className="muted">Загрузка…</p>
@@ -96,11 +147,11 @@ export default function ComparePage({ params }: { params: { id: string } }) {
     );
   }
 
-  const { a, b } = data.pair;
-  const pct = data.progress.estimatedTotal
-    ? Math.min(100, Math.round((data.progress.completed / data.progress.estimatedTotal) * 100))
+  const pct = data.screens.estimatedTotal
+    ? Math.min(100, Math.round((data.screens.completed / data.screens.estimatedTotal) * 100))
     : 0;
   const showNames = !data.blindMode || reveal;
+  const question = data.question ?? [];
 
   const name = (t: TrackDto) =>
     showNames ? (
@@ -112,11 +163,11 @@ export default function ComparePage({ params }: { params: { id: string } }) {
       "🎧"
     );
 
-  // Starting one player pauses the other — a video+audio cacophony helps nobody.
+  // Starting one player pauses the others — a cacophony helps nobody.
   const pauseOthers = (e: React.SyntheticEvent<HTMLMediaElement>) => {
     const self = e.currentTarget;
     document
-      .querySelectorAll<HTMLMediaElement>(".versus audio, .versus video")
+      .querySelectorAll<HTMLMediaElement>(".versus audio, .versus video, .group-card audio, .group-card video")
       .forEach((m) => {
         if (m !== self) m.pause();
       });
@@ -124,51 +175,185 @@ export default function ComparePage({ params }: { params: { id: string } }) {
 
   // Blind mode hides the footage too (it gives the track away): play the file
   // through an <audio> element until names are revealed.
-  const player = (t: TrackDto) =>
+  const player = (t: TrackDto, maxHeight: number) =>
     t.kind === "video" && showNames ? (
       <video
         controls
         preload="metadata"
         src={t.audioUrl}
         onPlay={pauseOthers}
-        style={{ width: "100%", maxHeight: 240, background: "#000", borderRadius: 8 }}
+        style={{ width: "100%", maxHeight, background: "#000", borderRadius: 8 }}
       />
     ) : (
       <audio controls preload="none" src={t.audioUrl} onPlay={pauseOthers} />
     );
 
+  const coverage = (
+    <span className="coverage">
+      Расставлено {data.coverage.orderedPct}% пар
+      {data.coverage.contradictory > 0
+        ? ` · противоречий ${data.coverage.contradictory}`
+        : ""}
+    </span>
+  );
+
+  const sizePicker =
+    data.maxGroupSize > 2 ? (
+      <label className="row" style={{ gap: 8, marginBottom: 0, fontSize: 13 }}>
+        <span className="muted">Сравнивать за раз</span>
+        <select
+          value={data.groupSize}
+          disabled={busy}
+          onChange={(e) => void act("", { groupSize: Number(e.target.value) })}
+          style={{ marginBottom: 0, width: 70 }}
+        >
+          {Array.from({ length: data.maxGroupSize - 1 }, (_, i) => i + 2).map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+        {data.groupSize > 5 ? (
+          <span className="muted" title="Удержать в голове больше пяти треков почти невозможно">
+            ⚠
+          </span>
+        ) : null}
+      </label>
+    ) : (
+      <span className="muted" style={{ fontSize: 13 }}>
+        Эта схема спрашивает только парами
+      </span>
+    );
+
+  if (data.isComplete) {
+    return (
+      <div className="container">
+        <h1>План пройден</h1>
+        <p className="muted">
+          Сделано {data.screens.completed} экранов. {coverage}.
+        </p>
+        {error ? <div className="error">{error}</div> : null}
+        <div className="panel">
+          <p style={{ marginTop: 0 }}>
+            Можно смотреть топ — или добрать точности ещё одним раундом: каждый трек
+            получит ещё {Math.max(1, data.groupSize - 1)} соперник(ов).
+          </p>
+          <div className="row" style={{ gap: 12 }}>
+            <a className="btn" href={`/tournaments/${params.id}`}>
+              Смотреть топ →
+            </a>
+            {data.canExtend ? (
+              <button className="btn secondary" disabled={busy} onClick={() => void act("/extend")}>
+                Ещё раунд
+              </button>
+            ) : null}
+            <button className="btn ghost" disabled={busy} onClick={() => void act("/undo")}>
+              ← Отменить последний ответ
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const rest = question.filter((t) => !picks.includes(t.id));
+  const canStopEarly = question.length > 2 && rest.length > 1;
+
   return (
     <div className="container">
       <div className="row" style={{ justifyContent: "space-between" }}>
-        <h1 style={{ margin: 0 }}>Что лучше?</h1>
+        <h1 style={{ margin: 0 }}>{question.length > 2 ? "Расставьте по местам" : "Что лучше?"}</h1>
         <a href={`/tournaments/${params.id}`} className="muted">Выйти (прогресс сохранён)</a>
       </div>
 
-      <div className="progressbar" style={{ margin: "16px 0 24px" }}>
+      <div className="progressbar" style={{ margin: "16px 0 10px" }}>
         <div style={{ width: `${pct}%` }} />
       </div>
-
-      <div className="versus">
-        <div className="choice">
-          <div className="name">{name(a)}</div>
-          {player(a)}
-          <button className="btn" style={{ marginTop: 16 }} onClick={() => submit("a")} disabled={busy}>
-            ← Это лучше
-          </button>
-        </div>
-        <div className="vs">VS</div>
-        <div className="choice">
-          <div className="name">{name(b)}</div>
-          {player(b)}
-          <button className="btn" style={{ marginTop: 16 }} onClick={() => submit("b")} disabled={busy}>
-            Это лучше →
-          </button>
-        </div>
+      <div className="compare-bar">
+        <span className="coverage">
+          Экран {data.screens.completed + 1} из ~{data.screens.estimatedTotal} · {coverage}
+        </span>
+        {sizePicker}
       </div>
 
+      {error ? <div className="error">{error}</div> : null}
+
+      {question.length === 2 ? (
+        <div className="versus">
+          <div className="choice">
+            <div className="name">{name(question[0])}</div>
+            {player(question[0], 240)}
+            <button
+              className="btn"
+              style={{ marginTop: 16 }}
+              onClick={() => void submit([question[0].id, question[1].id], [])}
+              disabled={busy}
+            >
+              ← Это лучше
+            </button>
+          </div>
+          <div className="vs">VS</div>
+          <div className="choice">
+            <div className="name">{name(question[1])}</div>
+            {player(question[1], 240)}
+            <button
+              className="btn"
+              style={{ marginTop: 16 }}
+              onClick={() => void submit([question[1].id, question[0].id], [])}
+              disabled={busy}
+            >
+              Это лучше →
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="group-grid">
+          {question.map((t, i) => {
+            const place = picks.indexOf(t.id);
+            return (
+              <div key={t.id} className={`group-card${place >= 0 ? " picked" : ""}`}>
+                {place >= 0 ? <span className="place-badge">{place + 1}</span> : null}
+                <div className="name">{name(t)}</div>
+                {player(t, 160)}
+                <button
+                  className={`btn rank-pick${place >= 0 ? " ghost" : ""}`}
+                  disabled={busy || place >= 0}
+                  onClick={() => pick(t.id)}
+                >
+                  {place >= 0 ? `${place + 1} место` : `Выбрать (${i + 1})`}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       <div className="row" style={{ justifyContent: "center", marginTop: 22, gap: 14 }}>
-        <button className="btn secondary" onClick={() => submit("draw")} disabled={busy}>
-          Ничья
+        {question.length === 2 ? (
+          <button
+            className="btn secondary"
+            onClick={() => void submit([], [question[0].id, question[1].id])}
+            disabled={busy}
+          >
+            Ничья
+          </button>
+        ) : null}
+        {canStopEarly ? (
+          <button
+            className="btn secondary"
+            onClick={() => void submit(picks, rest.map((t) => t.id))}
+            disabled={busy}
+          >
+            Остальные примерно равны
+          </button>
+        ) : null}
+        {picks.length > 0 ? (
+          <button className="btn ghost" onClick={() => setPicks([])} disabled={busy}>
+            Сбросить выбор
+          </button>
+        ) : null}
+        <button className="btn ghost" disabled={busy} onClick={() => void act("/undo")}>
+          ← Отменить последний ответ
         </button>
         {data.blindMode ? (
           <button className="btn ghost" onClick={() => setReveal((r) => !r)}>

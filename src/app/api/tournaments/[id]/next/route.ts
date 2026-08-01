@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { userOr401, notFound } from "@/lib/api";
 import { getTournament, nextComparison } from "@/server/tournaments";
+import { MAX_GROUP_SIZE } from "@/lib/domain/group-answer";
 
 export async function GET(
   _req: Request,
@@ -12,7 +13,7 @@ export async function GET(
   const t = await getTournament(auth.userId, params.id);
   if (!t) return notFound();
 
-  const { pair, progress, isComplete, standings } = nextComparison(t);
+  const step = nextComparison(t);
   const byId = new Map(t.tracks.map((tr) => [tr.id, tr]));
 
   const toDto = (id: string) => {
@@ -28,9 +29,16 @@ export async function GET(
 
   return NextResponse.json({
     blindMode: t.blindMode,
-    isComplete,
-    progress,
-    standings, // provisional top, or null if the scheme has no interim ranking
-    pair: pair ? { a: toDto(pair.a), b: toDto(pair.b) } : null,
+    isComplete: step.isComplete,
+    canExtend: step.canExtend,
+    groupSize: step.groupSize,
+    // Upper bound the picker offers: the engine's own cap, the global cap and
+    // the field size, whichever is smallest.
+    maxGroupSize: Math.min(step.maxGroupSize, MAX_GROUP_SIZE, t.tracks.length),
+    progress: step.progress,
+    screens: step.screens,
+    coverage: step.coverage,
+    standings: step.standings, // provisional top, or null for schemes without one
+    question: step.question ? step.question.map(toDto) : null,
   });
 }

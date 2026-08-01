@@ -39,6 +39,11 @@ model Tournament {
   blindMode Boolean  @default(false)
   status    String   @default("draft") // "draft" | "in_progress" | "completed"
   topSize   Int?
+  // Phase 18: how many tracks one comparison screen ranks at once (2 = pairs).
+  groupSize Int      @default(2)
+  // Opponents per track bought beyond the plan via "one more round". Stored in
+  // opponents, not rounds, so changing groupSize does not move what was bought.
+  bonusOpponents Int @default(0)
   // Serialized resumable engine state (JSON string). Lets a paused tournament resume.
   engineState String?
   createdAt DateTime @default(now())
@@ -46,6 +51,7 @@ model Tournament {
 
   tracks       Track[]
   comparisons  Comparison[]
+  batches      ComparisonBatch[]
   rankings     Ranking[]
   renderConfig RenderConfig?
   renderJobs   RenderJob[]
@@ -68,6 +74,21 @@ model Track {
   renderItems RenderItem[]
 }
 
+// Phase 18: one comparison screen. A group ranking lands as C(k,2) rows, and
+// they have to travel together — undo removes a whole screen, progress counts
+// screens, and resuming has to know what was actually shown when the user was
+// free to change the group size mid-run.
+model ComparisonBatch {
+  id           String   @id @default(cuid())
+  tournamentId String
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  size         Int // tracks shown on the screen
+  itemIds      String // JSON array of the shown track ids, in the order shown
+  createdAt    DateTime @default(now())
+
+  comparisons  Comparison[]
+}
+
 model Comparison {
   id           String   @id @default(cuid())
   tournamentId String
@@ -76,6 +97,9 @@ model Comparison {
   trackBId     String
   result       String // "a" | "b" | "draw"
   createdAt    DateTime @default(now())
+  // null on rows written before phase 18 (one pair per screen back then).
+  batchId      String?
+  batch        ComparisonBatch? @relation(fields: [batchId], references: [id], onDelete: Cascade)
 }
 
 model Ranking {
