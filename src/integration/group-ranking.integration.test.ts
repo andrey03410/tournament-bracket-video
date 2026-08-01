@@ -176,6 +176,44 @@ describe("a full grouped run", () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
+  it("never numbers the current screen past its own estimate", async () => {
+    // Growing the group shrinks the plan, so a run switched from pairs to fives
+    // can already be past the new estimate.
+    const id = await makeTournament("swiss", 9, 2);
+    for (let screen = 0; screen < 4; screen++) {
+      const t = (await getTournament(userId, id))!;
+      const q = nextComparison(t).question!;
+      await recordGroupAnswer(t, q, []);
+    }
+    await setGroupSize(userId, id, 5);
+
+    const t = (await getTournament(userId, id))!;
+    const step = nextComparison(t);
+    expect(step.question).not.toBeNull();
+    expect(step.screens.completed).toBe(4);
+    expect(step.screens.completed + 1).toBeLessThanOrEqual(step.screens.estimatedTotal);
+  });
+
+  it("reports contradictions instead of quietly ordering them", async () => {
+    // A user who answers inconsistently must see it, not get a confident top.
+    const id = await makeTournament("round_robin", 3, 3);
+    const t = (await getTournament(userId, id))!;
+    const [a, b, c] = nextComparison(t).question!;
+    await recordGroupAnswer(t, [a, b, c], []);
+
+    // undo the screen and answer the cycle by hand: a>b, b>c, c>a
+    await undoLastAnswer((await getTournament(userId, id))!);
+    for (const [x, y] of [[a, b], [b, c], [c, a]]) {
+      await prisma.comparison.create({
+        data: { tournamentId: id, trackAId: x, trackBId: y, result: "a" },
+      });
+    }
+    const cov = nextComparison((await getTournament(userId, id))!).coverage;
+    expect(cov.contradictory).toBe(3);
+    expect(cov.ordered).toBe(0);
+    expect(cov.orderedPct).toBe(0);
+  });
+
   it("reaches a full strict ranking that can be finalized", async () => {
     const id = await makeTournament("round_robin", 6, 3);
     await playOut(id);

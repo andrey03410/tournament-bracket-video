@@ -155,10 +155,14 @@ export function nextComparison(t: LoadedTournament) {
   // Screens, not comparisons: with a changeable group size the comparison count
   // is not something the user can feel, and the bar would jump when k changes.
   const legacyScreens = t.comparisons.filter((c) => c.batchId === null).length;
+  const done = t.batches.length + legacyScreens;
   const screens = {
-    completed: t.batches.length + legacyScreens,
+    completed: done,
+    // Growing the group shrinks the plan, so a run switched from pairs to fives
+    // can already be past the new estimate. The screen on screen still has to be
+    // inside it — "screen 3 of ~2" is nonsense.
     estimatedTotal: Math.max(
-      t.batches.length + legacyScreens,
+      done + (question ? 1 : 0),
       plannedScreens(t.scheme as Scheme, items.length, groupSize),
     ),
   };
