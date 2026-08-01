@@ -42,6 +42,15 @@ export function mergeWorstCaseComparisons(n: number): number {
 
 export const mergeEngine: Engine = {
   scheme: "merge",
+  // A merge sort already runs at the information-theoretic floor, so group
+  // answers buy it nothing: a k-way merge costs n*log2(n) comparisons either
+  // way. It stays pairwise and says so instead of silently ignoring the setting.
+  maxGroupSize: 2,
+
+  nextQuestion(items, comparisons): string[] | null {
+    const pair = this.nextPair(items, comparisons);
+    return pair ? [pair.a, pair.b] : null;
+  },
 
   nextPair(items, comparisons): Pair | null {
     const cmp = makeComparator(comparisons);

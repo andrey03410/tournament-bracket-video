@@ -5,6 +5,8 @@ import {
   computeScores,
   winCount,
   rankByScore,
+  playedPairs,
+  opponentCounts,
 } from "./comparisons";
 import type { Comparison } from "./types";
 
@@ -90,5 +92,38 @@ describe("rankByScore", () => {
     const r = rankByScore(items, []);
     expect(r.map((x) => x.id)).toEqual(["a", "b"]);
     expect(r.map((x) => x.rank)).toEqual([1, 2]);
+  });
+});
+
+describe("playedPairs", () => {
+  it("keys a pair the same way whichever side was asked first", () => {
+    const played = playedPairs([{ a: "b", b: "a", result: "b" }]);
+    expect(played.has(pairKey("a", "b"))).toBe(true);
+    expect(played.size).toBe(1);
+  });
+
+  it("counts a draw as played — it is an answer, not a gap", () => {
+    expect(playedPairs([{ a: "a", b: "b", result: "draw" }]).size).toBe(1);
+  });
+});
+
+describe("opponentCounts", () => {
+  const items = ["a", "b", "c"];
+
+  it("counts distinct opponents, not rows", () => {
+    const log: Comparison[] = [
+      { a: "a", b: "b", result: "a" },
+      { a: "a", b: "b", result: "b" }, // a rematch must not look like progress
+      { a: "a", b: "c", result: "a" },
+    ];
+    const counts = opponentCounts(items, log);
+    expect(counts.get("a")).toBe(2);
+    expect(counts.get("b")).toBe(1);
+    expect(counts.get("c")).toBe(1);
+  });
+
+  it("starts everyone at zero and ignores unknown tracks", () => {
+    const counts = opponentCounts(items, [{ a: "a", b: "zzz", result: "a" }]);
+    expect([...counts.values()]).toEqual([0, 0, 0]);
   });
 });

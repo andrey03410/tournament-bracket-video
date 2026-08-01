@@ -1,5 +1,11 @@
 import type { Comparison, Pair, Progress, RankedItem } from "../types";
-import { lookup, pairKey, rankByScore } from "../comparisons";
+import { computeScores, opponentCounts, pairKey, playedPairs, rankByScore } from "../comparisons";
+import {
+  MAX_GROUP_SIZE,
+  clampGroupSize,
+  plannedScreens,
+  targetComparisonsPerItem,
+} from "../group-answer";
 import type { Engine } from "./index";
 
 /** Number of Swiss rounds for n players: ceil(log2 n), at least 1. */
@@ -9,97 +15,93 @@ export function swissRounds(n: number): number {
 }
 
 /**
- * Pair a points-sorted list adjacently, preferring opponents not yet played.
- * Falls back to a rematch if no fresh opponent remains. An odd one out gets a bye
- * (no game that round). Mutates `played` with the pairings it produces.
+ * Phase 18 rewrote the scheduler. It used to replay every round from scratch:
+ * sort by points at the start of a round, pair adjacently. With a group size the
+ * user can change mid-run that replay reconstructs a schedule that was never
+ * shown, so the next group is now derived from the state of the log instead:
+ *
+ *   1. candidates sorted by (opponents faced asc, points desc, upload order asc)
+ *   2. the seed is the first candidate still short of its planned opponents
+ *   3. fill up to k with candidates that have not met anyone already picked
+ *
+ * Two consequences worth knowing. Points now update inside a round, so the order
+ * of questions differs slightly from the old pairing even at k=2. And a track
+ * left out of an uneven group is the one with the fewest opponents, so it heads
+ * the next group automatically — no more byes that quietly cost a comparison.
  */
-function pairRound(order: string[], played: Set<string>): Pair[] {
-  const used = new Set<string>();
-  const pairs: Pair[] = [];
-  for (let i = 0; i < order.length; i++) {
-    const x = order[i];
-    if (used.has(x)) continue;
-    let partner = -1;
-    for (let j = i + 1; j < order.length; j++) {
-      if (!used.has(order[j]) && !played.has(pairKey(x, order[j]))) {
-        partner = j;
-        break;
-      }
-    }
-    if (partner === -1) {
-      for (let j = i + 1; j < order.length; j++) {
-        if (!used.has(order[j])) {
-          partner = j;
-          break;
-        }
-      }
-    }
-    if (partner === -1) {
-      used.add(x); // bye
-      continue;
-    }
-    const y = order[partner];
-    used.add(x);
-    used.add(y);
-    pairs.push({ a: x, b: y });
-    played.add(pairKey(x, y));
-  }
-  return pairs;
-}
+function nextGroup(
+  items: string[],
+  comparisons: Comparison[],
+  groupSize: number,
+  bonusOpponents = 0,
+): string[] | null {
+  const n = items.length;
+  if (n < 2) return null;
 
-/**
- * Simulate rounds in order. Standings used to pair round r reflect only the
- * results of rounds < r (we stop as soon as we hit an unanswered pairing).
- * Returns the first unanswered pair, or null if all rounds are complete.
- */
-function findNext(items: string[], comparisons: Comparison[]): Pair | null {
-  const rounds = swissRounds(items.length);
-  const points = new Map<string, number>(items.map((id) => [id, 0]));
+  const k = clampGroupSize(groupSize, n);
+  // "One more round" raises the bar by a round's worth of opponents; stored in
+  // opponents rather than rounds so the goalposts survive a change of k.
+  const target = targetComparisonsPerItem(n) + Math.max(0, bonusOpponents);
+  const played = playedPairs(comparisons);
+  const counts = opponentCounts(items, comparisons);
+  const points = computeScores(items, comparisons);
   const originalIndex = new Map(items.map((id, i) => [id, i]));
-  const played = new Set<string>();
 
-  for (let r = 0; r < rounds; r++) {
-    const order = [...items].sort((a, b) => {
-      const pa = points.get(a) ?? 0;
-      const pb = points.get(b) ?? 0;
-      if (pa !== pb) return pb - pa;
-      return (originalIndex.get(a) ?? 0) - (originalIndex.get(b) ?? 0);
-    });
-    const pairs = pairRound(order, played);
-    for (const pair of pairs) {
-      const res = lookup(comparisons, pair.a, pair.b);
-      if (res === undefined) return pair; // first unanswered pairing
-      if (res === "a") points.set(pair.a, (points.get(pair.a) ?? 0) + 1);
-      else if (res === "b") points.set(pair.b, (points.get(pair.b) ?? 0) + 1);
-      else {
-        points.set(pair.a, (points.get(pair.a) ?? 0) + 0.5);
-        points.set(pair.b, (points.get(pair.b) ?? 0) + 0.5);
-      }
+  const order = [...items].sort((a, b) => {
+    const ca = counts.get(a) ?? 0;
+    const cb = counts.get(b) ?? 0;
+    if (ca !== cb) return ca - cb;
+    const pa = points.get(a) ?? 0;
+    const pb = points.get(b) ?? 0;
+    if (pa !== pb) return pb - pa;
+    return (originalIndex.get(a) ?? 0) - (originalIndex.get(b) ?? 0);
+  });
+
+  const seed = order.find((id) => (counts.get(id) ?? 0) < target);
+  if (seed === undefined) return null; // every track met its planned opponents
+
+  const group = [seed];
+  for (const candidate of order) {
+    if (group.length === k) break;
+    if (group.includes(candidate)) continue;
+    if (group.every((picked) => !played.has(pairKey(picked, candidate)))) {
+      group.push(candidate);
     }
   }
-  return null;
+
+  // The seed is short of `target <= n-1` opponents, so a fresh one always
+  // exists; the guard is here so an unforeseen state ends the run instead of
+  // looping forever on a group of one.
+  return group.length >= 2 ? group : null;
 }
 
 export const swissEngine: Engine = {
   scheme: "swiss",
+  maxGroupSize: MAX_GROUP_SIZE,
 
-  nextPair(items, comparisons): Pair | null {
-    return findNext(items, comparisons);
+  nextQuestion(items, comparisons, groupSize, bonusOpponents = 0): string[] | null {
+    return nextGroup(items, comparisons, groupSize, bonusOpponents);
   },
 
-  isComplete(items, comparisons): boolean {
-    return findNext(items, comparisons) === null;
+  nextPair(items, comparisons): Pair | null {
+    const group = nextGroup(items, comparisons, 2);
+    return group ? { a: group[0], b: group[1] } : null;
+  },
+
+  isComplete(items, comparisons, bonusOpponents = 0): boolean {
+    return nextGroup(items, comparisons, 2, bonusOpponents) === null;
   },
 
   ranking(items, comparisons): RankedItem[] {
     return rankByScore(items, comparisons);
   },
 
-  progress(items, comparisons): Progress {
+  progress(items, comparisons, groupSize = 2): Progress {
     const n = items.length;
+    const k = clampGroupSize(groupSize, n);
     return {
       completed: comparisons.length,
-      estimatedTotal: swissRounds(n) * Math.floor(n / 2),
+      estimatedTotal: plannedScreens("swiss", n, k) * ((k * (k - 1)) / 2),
     };
   },
 

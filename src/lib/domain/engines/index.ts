@@ -13,12 +13,29 @@ import { roundRobinEngine } from "./round-robin";
  */
 export interface Engine {
   scheme: Scheme;
+  /** Largest group this engine can ask about at once (2 = pairs only). */
+  maxGroupSize: number;
+  /**
+   * Tracks to rank on the next screen, best-first once answered. Two or more
+   * items, never larger than `groupSize`; null when the tournament is complete.
+   */
+  nextQuestion(
+    items: string[],
+    comparisons: Comparison[],
+    groupSize: number,
+    /** Extra opponents per track bought by "one more round" (Swiss only). */
+    bonusOpponents?: number,
+  ): string[] | null;
   /** Next pair to compare, or null when the tournament is complete. */
   nextPair(items: string[], comparisons: Comparison[]): Pair | null;
-  isComplete(items: string[], comparisons: Comparison[]): boolean;
+  isComplete(
+    items: string[],
+    comparisons: Comparison[],
+    bonusOpponents?: number,
+  ): boolean;
   /** Final ranking, best -> worst. Valid once isComplete() is true. */
   ranking(items: string[], comparisons: Comparison[]): RankedItem[];
-  progress(items: string[], comparisons: Comparison[]): Progress;
+  progress(items: string[], comparisons: Comparison[], groupSize?: number): Progress;
   /**
    * Provisional standings mid-tournament, or null if the scheme has no meaningful
    * intermediate ranking (e.g. comparison sort). Used to show a live preliminary top.

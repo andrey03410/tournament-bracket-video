@@ -25,6 +25,31 @@ export function lookup(
   return undefined;
 }
 
+/** Unordered keys of every pair the log has an answer for. */
+export function playedPairs(comparisons: Comparison[]): Set<string> {
+  const played = new Set<string>();
+  for (const c of comparisons) played.add(pairKey(c.a, c.b));
+  return played;
+}
+
+/**
+ * How many *distinct* opponents each item has faced. Distinct, not rows: a
+ * rematch must not look like progress, and group answers write one row per pair.
+ */
+export function opponentCounts(
+  items: string[],
+  comparisons: Comparison[],
+): Map<string, number> {
+  const known = new Set(items);
+  const seen = new Map<string, Set<string>>(items.map((id) => [id, new Set()]));
+  for (const c of comparisons) {
+    if (!known.has(c.a) || !known.has(c.b) || c.a === c.b) continue;
+    seen.get(c.a)!.add(c.b);
+    seen.get(c.b)!.add(c.a);
+  }
+  return new Map([...seen].map(([id, opponents]) => [id, opponents.size]));
+}
+
 export class NeedComparison extends Error {
   constructor(
     public a: string,
